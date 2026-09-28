@@ -55,8 +55,8 @@ class FakeFeed:
             if b.symbol == symbol and b.open_time >= since and b.close_time <= now
         ]
 
-    async def spread_pct(self, symbol: str) -> float | None:
-        return 0.01
+    async def spreads(self, symbols: list[str]) -> dict[str, float]:
+        return dict.fromkeys(symbols, 0.01)
 
     async def close(self) -> None:
         pass

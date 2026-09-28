@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { MarketStatus, Score, Status, Trade, Backtest } from "../api";
 import {
   ago,
@@ -73,12 +74,27 @@ function FactorBars({ score }: { score: Score }) {
   );
 }
 
-export function ScoresCard({ scores, running }: { scores: Score[] | undefined; running: boolean }) {
+interface ScoresProps {
+  scores: Score[] | undefined;
+  running: boolean;
+  onSelect: (market: string) => void;
+}
+
+const TOP = 10;
+
+export function ScoresCard({ scores, running, onSelect }: ScoresProps) {
+  const [showAll, setShowAll] = useState(false);
+  const meeting = scores?.filter((s) => s.meets).length ?? 0;
+  const visible = showAll ? scores : scores?.slice(0, TOP);
   return (
     <section className="card" aria-labelledby="scores-title">
       <div className="card-head">
         <h2 id="scores-title">Puntuación ahora</h2>
-        <span className="card-note">entrada con 70 o más</span>
+        <span className="card-note">
+          {scores && scores.length > 0
+            ? `${scores.length} mercados · ${meeting} cumplen (≥ 70)`
+            : "entrada con 70 o más"}
+        </span>
       </div>
       {!running && <p className="empty">Se calcula con el motor en marcha.</p>}
       {running && (!scores || scores.length === 0) && (
@@ -86,18 +102,20 @@ export function ScoresCard({ scores, running }: { scores: Score[] | undefined; r
           Ningún mercado vigilado usa la estrategia de puntuación (config/live.yaml).
         </p>
       )}
-      {scores?.map((s) => (
+      {visible?.map((s) => (
         <div className="score-row" key={s.market}>
           <div className="score-top">
             <div>
-              <strong>{s.symbol}</strong>{" "}
+              <button className="link" onClick={() => onSelect(s.market)} title="Ver gráfico">
+                {s.symbol}
+              </button>{" "}
               <span className="cell-sub">
                 {price(s.close)} · ATR {pct(s.atr_pct, false)}
               </span>
             </div>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               {s.meets && <span className="pill ok">cumple</span>}
-              {!s.tradable && <span className="pill warn">no cubre costes</span>}
+              {!s.tradable && <span className="pill warn">volatilidad insuficiente</span>}
               <span className="score-value num">{points(s.score)}</span>
             </div>
           </div>
@@ -107,6 +125,11 @@ export function ScoresCard({ scores, running }: { scores: Score[] | undefined; r
           <FactorBars score={s} />
         </div>
       ))}
+      {scores && scores.length > TOP && (
+        <button className="btn" style={{ width: "100%", marginTop: 8 }} onClick={() => setShowAll(!showAll)}>
+          {showAll ? `Ver solo los ${TOP} mejores` : `Ver los ${scores.length} mercados`}
+        </button>
+      )}
     </section>
   );
 }
@@ -121,10 +144,11 @@ export function MarketsCard({ markets, running, onToggle }: MarketsProps) {
   return (
     <section className="card" aria-labelledby="markets-title">
       <div className="card-head">
-        <h2 id="markets-title">Mercados vigilados</h2>
+        <h2 id="markets-title">Mercados vigilados · {markets.length}</h2>
         <span className="card-note">desactivar = no abre posiciones nuevas</span>
       </div>
       {markets.length === 0 && <p className="empty">No hay mercados en config/live.yaml.</p>}
+      <div className="scroll-list">
       {markets.map((m) => (
         <div
           key={m.market}
@@ -156,6 +180,7 @@ export function MarketsCard({ markets, running, onToggle }: MarketsProps) {
           {m.stale && <span className="pill warn">sin datos</span>}
         </div>
       ))}
+      </div>
     </section>
   );
 }

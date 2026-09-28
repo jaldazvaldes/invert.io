@@ -183,7 +183,7 @@ class RiskManager:
         if stop <= 0 or stop >= price:
             return "stop-loss no válido tras redondear"
 
-        fees, sim = venue.fees, venue.simulation
+        fees, sim = venue.fees, venue.simulation_for(signal.symbol)
         # Coste de ida y vuelta estimado (comisión taker, divisa, spread y deslizamiento).
         round_trip_pct = to_decimal(
             2 * (fees.taker_pct + fees.fx_pct + sim.slippage_pct) + sim.spread_pct

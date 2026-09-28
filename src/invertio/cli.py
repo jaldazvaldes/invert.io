@@ -30,11 +30,15 @@ db_app = typer.Typer(help="Base de datos SQLite.", no_args_is_help=True)
 data_app = typer.Typer(help="Datos de mercado históricos.", no_args_is_help=True)
 paper_app = typer.Typer(help="Resultados e historial del modo paper.", no_args_is_help=True)
 telegram_app = typer.Typer(help="Configuración del bot de Telegram.", no_args_is_help=True)
+lab_app = typer.Typer(
+    help="Laboratorio de estrategias (optimizar y validar).", no_args_is_help=True
+)
 app.add_typer(config_app, name="config")
 app.add_typer(db_app, name="db")
 app.add_typer(data_app, name="data")
 app.add_typer(paper_app, name="paper")
 app.add_typer(telegram_app, name="telegram")
+app.add_typer(lab_app, name="lab")
 
 console = Console()
 
@@ -294,7 +298,7 @@ def run(
         raise typer.Exit(code=1)
     config = _load_app_config(settings)
     live = _load_live_config(settings, config)
-    tf = timeframe or config.data.timeframe
+    tf = timeframe or live.timeframe or config.data.timeframe
     console.print(f"Arrancando en modo [bold]paper[/bold] con velas de {tf}. Ctrl+C para parar.")
     if panel:
         console.print(f"Panel: [bold]http://localhost:{settings.panel_port}[/bold]")
@@ -343,6 +347,90 @@ def panel_command() -> None:
         asyncio.run(serve())
     except KeyboardInterrupt:
         console.print("Detenido.")
+
+
+@app.command()
+def analyze(
+    panel: Annotated[bool, typer.Option(help="Arrancar también el panel web.")] = True,
+    telegram: Annotated[bool, typer.Option(help="Enviar avisos al chat configurado.")] = True,
+    cycles: Annotated[
+        int | None, typer.Option(min=1, help="Parar después de N ciclos (validación).")
+    ] = None,
+    manual_orders: Annotated[
+        bool,
+        typer.Option("--manual-orders", help="Habilitar confirmaciones manuales reales (50 €)."),
+    ] = False,
+    simulate: Annotated[
+        bool, typer.Option("--simulate", help="Simular compras y ventas con 50 € ficticios.")
+    ] = False,
+    compare_strategies: Annotated[
+        bool,
+        typer.Option("--compare-strategies", help="Comparar cuatro estrategias con 50 € cada una."),
+    ] = False,
+    all_markets: Annotated[
+        bool,
+        typer.Option("--all-markets", help="Observar todos los pares EUR con datos autenticados."),
+    ] = False,
+    execution_trial: Annotated[
+        bool,
+        typer.Option(
+            "--execution-trial", help="Ensayo maker/taker y velas 1/5m: cuatro carteras ficticias."
+        ),
+    ] = False,
+    timeframe_trial: Annotated[
+        bool,
+        typer.Option(
+            "--timeframe-trial",
+            help="Las cuatro estrategias con velas de 10 min y 1 h: ocho carteras ficticias.",
+        ),
+    ] = False,
+) -> None:
+    """Analiza Revolut X; --manual-orders habilita los botones de órdenes reales."""
+    from invertio.analysis.app import run_analysis
+    from invertio.analysis.config import load_analysis_config
+
+    settings = _load_settings()
+    config = _load_app_config(settings)
+    try:
+        analysis = load_analysis_config(settings.config_dir)
+        if all_markets:
+            analysis = analysis.model_copy(update={"market_scope": "all_eur"})
+        console.print(
+            "[bold]Análisis experimental[/bold] · Revolut X · velas 1 min · Ctrl+C para parar"
+        )
+        if panel:
+            console.print(f"Panel: [bold]http://localhost:{settings.panel_port}[/bold]")
+        if manual_orders:
+            console.print("[yellow]Órdenes reales manuales habilitadas; cada envío exige "
+                          "confirmación en el panel. Límite acumulado de compras: 50 €.[/yellow]")
+        if simulate:
+            console.print("[cyan]Simulación automática con dinero ficticio: "
+                          "no envía órdenes a Revolut X.[/cyan]")
+        if compare_strategies:
+            console.print(
+                "[cyan]Cuatro estrategias independientes: 50 € ficticios cada una.[/cyan]"
+            )
+        if execution_trial:
+            console.print(
+                "[cyan]Prueba de costes: 4 × 50 € ficticios; compras maker pendientes "
+                "o inmediatas, velas 1/5 min y ventas taker.[/cyan]"
+            )
+        if timeframe_trial:
+            console.print(
+                "[cyan]Velas de 10 min y 1 h: 8 × 50 € ficticios con las mismas cuatro "
+                "estrategias.[/cyan]"
+            )
+        asyncio.run(run_analysis(settings, config, analysis, panel=panel, telegram_enabled=telegram,
+                                 max_cycles=cycles, manual_orders=manual_orders,
+                                 simulate=simulate, compare_strategies=compare_strategies,
+                                 execution_trial=execution_trial,
+                                 timeframe_trial=timeframe_trial,
+                                 warn=_warn))
+    except KeyboardInterrupt:
+        console.print("Análisis detenido; el historial se conserva.")
+    except (FileNotFoundError, ValueError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from None
 
 
 @app.command()
@@ -395,8 +483,8 @@ def scan(
              "volumen": "vol", "ruptura": "rupt"}  # fmt: skip
     entry = points_str(params.entry_score)
     table = Table(title=f"Puntuación actual · velas {tf} · entrada ≥ {entry}")
-    for column in ("#", "mercado", "nota", *(short[f] for f in FACTORS), "ATR %", "cubre costes",
-                   "precio", "stop", "objetivo", "señal"):  # fmt: skip
+    for column in ("#", "mercado", "nota", *(short[f] for f in FACTORS), "ATR %",
+                   "volatilidad suficiente", "precio", "stop", "objetivo", "señal"):  # fmt: skip
         table.add_column(column, justify="left" if column in ("mercado",) else "right")
     for index, (venue_id, row) in enumerate(rows[:top], start=1):
         r = row.result
@@ -421,6 +509,99 @@ def scan(
         "[dim]Nota calculada con reglas fijas (config/strategies/puntuacion.yaml); no es una "
         "recomendación. Compruébala en backtest antes de fiarte de ella.[/dim]"
     )
+
+
+@lab_app.command("download")
+def lab_download(
+    days: Annotated[
+        int | None, typer.Option(help="Días de historia (por defecto lab.yaml).")
+    ] = None,
+) -> None:
+    """Descarga la historia de todas las criptos en EUR comunes a Revolut X y la fuente."""
+    from invertio.lab.config import load_lab_config
+    from invertio.lab.data import common_symbols, download_many
+
+    settings = _load_settings()
+    lab = load_lab_config(settings.config_dir)
+    store = BarStore(settings.data_dir / "bars")
+
+    async def run() -> dict[str, int]:
+        venue = _load_app_config(settings).venue(lab.venue)
+        symbols = await common_symbols(lab.venue, lab.source, venue.quote_currency)
+        with console.status(f"Descargando {len(symbols)} monedas…") as status:
+            return await download_many(
+                lab.source,
+                symbols,
+                lab.base_timeframe,
+                days or lab.history_days,
+                store,
+                venue=lab.venue,
+                on_symbol=lambda s, i, n: status.update(f"Descargando {s} ({i}/{n})…"),
+            )
+
+    totals = asyncio.run(run())
+    console.print(f"{len(totals)} monedas con historia de {lab.base_timeframe} guardada.")
+
+
+@lab_app.command("run")
+def lab_run(
+    workers: Annotated[
+        int | None, typer.Option(help="Procesos en paralelo (por defecto, núcleos − 1).")
+    ] = None,
+    strategy: Annotated[
+        list[str], typer.Option("--strategy", "-s", help="Solo estas estrategias (repetible).")
+    ] = [],  # noqa: B006
+) -> None:
+    """Optimiza cada estrategia en entrenamiento y la juzga en el último año (fuera de muestra)."""
+    from rich.progress import BarColumn, MofNCompleteColumn, Progress, TimeRemainingColumn
+
+    from invertio.lab.config import load_lab_config
+    from invertio.lab.report import print_lab, save_lab
+    from invertio.lab.runner import lab_app_config, run_lab
+    from invertio.live.feeds import CcxtLiveFeed
+
+    settings = _load_settings()
+    config = _load_app_config(settings)
+    lab = load_lab_config(settings.config_dir)
+    store = BarStore(settings.data_dir / "bars")
+
+    async def market_info() -> tuple[list[str], dict[str, Any], dict[str, float]]:
+        feed = CcxtLiveFeed(lab.venue, lab.venue)
+        try:
+            venue_symbols = await feed.symbols(config.venue(lab.venue).quote_currency)
+            symbols = [s for s in venue_symbols if store.info(lab.source, s, lab.base_timeframe)]
+            return symbols, await feed.instrument_rules(symbols), await feed.spreads(symbols)
+        finally:
+            await feed.close()
+
+    with console.status("Leyendo precisión y spreads reales de Revolut X…"):
+        symbols, rules, spreads = asyncio.run(market_info())
+    if not symbols:
+        console.print("[red]No hay historia descargada. Ejecuta: invertio lab download[/red]")
+        raise typer.Exit(code=1)
+    lab_config = lab_app_config(config, lab.venue, symbols, rules, spreads)
+
+    with Progress(
+        "[progress.description]{task.description}",
+        BarColumn(),
+        MofNCompleteColumn(),
+        TimeRemainingColumn(),
+        console=console,
+    ) as progress:
+        task_id = progress.add_task("Preparando…", total=None)
+        result = run_lab(
+            lab,
+            lab_config,
+            settings.data_dir / "bars",
+            workers=workers,
+            only_strategies=strategy or None,
+            spreads=spreads,
+            on_phase=lambda text: progress.update(task_id, description=text, completed=0),
+            on_progress=lambda done, total: progress.update(task_id, completed=done, total=total),
+        )
+    print_lab(console, result, lab)
+    folder = save_lab(settings.data_dir / "lab", result, lab)
+    console.print(f"Informe: {folder.resolve() / 'report.html'}")
 
 
 @paper_app.command("report")

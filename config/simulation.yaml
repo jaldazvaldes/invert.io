@@ -1,0 +1,15 @@
+# Cuenta FICTICIA: nunca envía órdenes. Usa los datos del proceso de análisis.
+# La sesión guarda esta configuración; cambiarla no reinicia el saldo silenciosamente.
+initial_eur: "50"
+allocation_eur: "10"
+max_positions: 5
+fee_pct: "0.09"
+max_slippage_pct: "0.1"
+max_spread_pct: "0.3"
+stop_atr: "2"
+target_atr: "3"
+quote_max_age_seconds: 60
+bar_max_age_seconds: 120
+lifetime_minutes: 240
+entry_score: 70
+exit_score: 40

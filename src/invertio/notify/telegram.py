@@ -266,8 +266,12 @@ class TelegramCommands:
                 "Ningún mercado vigilado usa la estrategia de puntuación (live.yaml)."
             )
             return
-        lines = ["<b>Puntuación actual</b> (0-100)"]
-        for score, meets in scores:
+        meeting = sum(1 for _, meets in scores if meets)
+        lines = [
+            f"<b>Puntuación actual</b> (0-100) · {len(scores)} mercados · {meeting} cumplen",
+            "Los 10 mejores:",
+        ]
+        for score, meets in scores[:10]:
             flag = " ✅ cumple" if meets else "" if score.tradable else " · no cubre costes"
             lines.append(
                 f"<b>{html(score.symbol)}</b>: {points_str(score.score)}{flag}\n"

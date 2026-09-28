@@ -186,12 +186,177 @@ export interface Backtest {
   markets: BacktestMarket[];
 }
 
+export interface LabAggregate {
+  symbols: number;
+  median_return: number;
+  pct_positive: number;
+  median_buy_and_hold: number;
+  median_drawdown: number;
+  avg_trades: number;
+  median_trade_pct: number;
+}
+
+export interface LabCandidate {
+  strategy: string;
+  timeframe: string;
+  params: Record<string, unknown>;
+  train: LabAggregate;
+  test: LabAggregate | null;
+  verdict: string;
+  reasons: string[];
+}
+
+export interface LabSummary {
+  id: string;
+  report_url: string;
+  test_start: string;
+  finished_at: string;
+  symbols_train: number;
+  symbols_test: number;
+  backtests: number;
+  candidates: LabCandidate[];
+}
+
 export interface AppConfig {
   mode: string;
   timeframe: string;
   risk: Record<string, number | string | boolean>;
   venues: { id: string; asset_class: string; quote: string; symbols: string[] }[];
   markets: { market: string; strategy: string }[];
+}
+
+export interface AnalysisStatus {
+  available: boolean;
+  running: boolean;
+  state: "starting" | "running" | "stopped" | "degraded";
+  timeframe: string;
+  interval_seconds: number;
+  selected: string[];
+  coverage?: {
+    scope: "top" | "all_eur";
+    catalog_eur: number;
+    observed: number;
+    entry_eligible: number;
+    excluded: number;
+    data_access: "public" | "authenticated";
+    request_interval_seconds: number;
+  };
+  warmup: { ready: number; total: number };
+  cycles: number;
+  last_cycle_at: string | null;
+  last_error: string | null;
+  telegram: { configured: boolean; pending: number; sent: number; failed: number };
+  config: Record<string, unknown>;
+}
+
+export interface AnalysisCosts {
+  eligible: boolean;
+  reasons: string[];
+  entry: number | null;
+  stop: number | null;
+  target: number | null;
+  quantity: number | null;
+  round_trip_cost_pct: number | null;
+  round_trip_cost_eur: number | null;
+  buy_slippage_pct: number | null;
+  sell_slippage_pct: number | null;
+  target_net_pct: number | null;
+}
+
+export interface AnalysisObservation {
+  market: string;
+  bar_ts: string | null;
+  observed_at: string;
+  score: number | null;
+  points: Record<string, number>;
+  max_points: number | Record<string, number>;
+  positive: string[];
+  negative: string[];
+  reasons: string[];
+  state: "warming" | "watching" | "eligible" | "open" | "unavailable";
+  price: number | null;
+  atr_pct: number | null;
+  spread_pct: number | null;
+  quote_volume: number | null;
+  quote_ts?: string | null;
+  costs: AnalysisCosts | null;
+  opportunity_id: string | null;
+}
+
+export interface AnalysisRanking {
+  rows: AnalysisObservation[];
+  excluded: { market: string; reasons: string[] }[];
+  updated_at: string | null;
+}
+
+export interface AnalysisHorizon {
+  at: string | null;
+  return_pct: number | null;
+  net_return_pct: number | null;
+  quality: string;
+}
+
+export interface AnalysisOpportunity {
+  id: string;
+  market: string;
+  created_at: string;
+  updated_at: string;
+  bar_ts: string;
+  status: "open" | "closed" | "interrupted";
+  outcome: string | null;
+  quality: "complete" | "incomplete" | "ambiguous";
+  ended_at: string | null;
+  entry: number;
+  stop: number;
+  target: number;
+  reference_eur: number;
+  quantity: number;
+  score: number;
+  points: Record<string, number>;
+  max_points: number | Record<string, number>;
+  positive: string[];
+  negative: string[];
+  costs: AnalysisCosts;
+  rule_version: string;
+  config: Record<string, unknown>;
+  high_water: number;
+  low_water: number;
+  mfe_pct: number | null;
+  mae_pct: number | null;
+  horizons: Partial<Record<"15m" | "1h" | "4h", AnalysisHorizon>>;
+  end_price: number | null;
+  estimated_return_pct: number | null;
+  reason: string | null;
+}
+
+export interface AnalysisNotification {
+  id?: string;
+  kind: string;
+  status: string;
+  created_at?: string;
+  sent_at?: string | null;
+  last_error?: string | null;
+}
+
+export interface AnalysisDetail extends AnalysisOpportunity {
+  observations: AnalysisObservation[];
+  notifications: AnalysisNotification[];
+}
+
+export interface AnalysisSummary {
+  total: number;
+  open: number;
+  closed: number;
+  interrupted: number;
+  complete: number;
+  incomplete: number;
+  ambiguous: number;
+  positive: number;
+  known_results: number;
+  mean_return_pct: number | null;
+  outcomes: Record<string, number>;
+  versions?: Record<string, number>;
+  by_version?: Record<string, AnalysisSummary>;
 }
 
 export class ApiError extends Error {
@@ -246,7 +411,8 @@ export type LiveMessage =
   | { type: "order"; market: string; side: string; status: string }
   | { type: "fill"; market: string; side: string; price: number; quantity: number }
   | { type: "state"; state: EngineState; reason: string }
-  | { type: "scan"; status: string };
+  | { type: "scan"; status: string }
+  | { type: "analysis"; state?: string };
 
 /** WebSocket con reconexión automática. Devuelve la función para cerrarlo. */
 export function connectLive(

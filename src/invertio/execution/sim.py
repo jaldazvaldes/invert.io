@@ -63,17 +63,19 @@ class SimBroker:
         self._bus = bus
         self._clock = clock
         self._portfolio = portfolio
-        fees, sim = venue.fees, venue.simulation
+        fees = venue.fees
         self._taker = to_decimal(fees.taker_pct + fees.fx_pct) / HUNDRED
         self._maker = to_decimal(fees.maker_pct + fees.fx_pct) / HUNDRED
-        self._market_impact = (
-            to_decimal(sim.spread_pct) / 2 + to_decimal(sim.slippage_pct)
-        ) / HUNDRED
-        self._stop_slippage = to_decimal(sim.slippage_pct) / HUNDRED
-        self._ttl = sim.limit_ttl_bars
         self._pending: dict[str, _Pending] = {}
         self._brackets: dict[str, _Bracket] = {}  # símbolo → stop / take-profit activos
         self.orders: dict[str, Order] = {}
+
+    def _market_impact(self, symbol: str) -> Decimal:
+        sim = self.venue.simulation_for(symbol)
+        return (to_decimal(sim.spread_pct) / 2 + to_decimal(sim.slippage_pct)) / HUNDRED
+
+    def _stop_slippage(self, symbol: str) -> Decimal:
+        return to_decimal(self.venue.simulation_for(symbol).slippage_pct) / HUNDRED
 
     # --- API de bróker -----------------------------------------------------------------
 
@@ -109,7 +111,7 @@ class SimBroker:
             return
         now = self._clock.now()
         order = await self._new_exit_order(symbol, position.quantity, reason, now)
-        await self._fill(order, last * (1 - self._market_impact), self._taker, now)
+        await self._fill(order, last * (1 - self._market_impact(symbol)), self._taker, now)
 
     def restore_bracket(
         self, symbol: str, strategy_id: str, stop_loss: Decimal, take_profit: Decimal | None
@@ -136,7 +138,7 @@ class SimBroker:
         at = self._event_time(bar)
         if request.type is OrderType.MARKET:
             direction = 1 if request.side is Side.BUY else -1
-            price = open_price * (1 + direction * self._market_impact)
+            price = open_price * (1 + direction * self._market_impact(request.symbol))
             await self._fill(order, price, self._taker, at)
             return
         assert request.limit_price is not None
@@ -149,7 +151,7 @@ class SimBroker:
             await self._fill(order, request.limit_price, self._maker, at)
             return
         pending.bars_waited += 1
-        if pending.bars_waited >= self._ttl:
+        if pending.bars_waited >= self.venue.simulation_for(request.symbol).limit_ttl_bars:
             await self.cancel(order.client_order_id)
 
     async def _check_brackets(self, bar: Bar) -> None:
@@ -159,9 +161,10 @@ class SimBroker:
             return
         low, high, open_price = to_decimal(bar.low), to_decimal(bar.high), to_decimal(bar.open)
         if open_price <= bracket.stop_loss:
-            price, reason, fee = open_price * (1 - self._stop_slippage), "stop_loss", self._taker
+            slip = self._stop_slippage(bar.symbol)
+            price, reason, fee = open_price * (1 - slip), "stop_loss", self._taker
         elif low <= bracket.stop_loss:
-            price = bracket.stop_loss * (1 - self._stop_slippage)
+            price = bracket.stop_loss * (1 - self._stop_slippage(bar.symbol))
             reason, fee = "stop_loss", self._taker
         elif bracket.take_profit is not None and high > bracket.take_profit:
             price, reason, fee = bracket.take_profit, "take_profit", self._maker

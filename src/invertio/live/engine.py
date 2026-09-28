@@ -196,23 +196,36 @@ class LiveEngine:
     async def tick(self) -> None:
         now = self.clock.now()
         new_bars: list[Bar] = []
+        polled: dict[int, tuple[LiveFeed, list[MarketRuntime]]] = {}
         for market in self.markets:
             if not self._market_open(market, now):
                 continue
             since = market.last_open + self.tf if market.last_open else now - self._lookback(market)
             try:
                 bars = await market.feed.closed_bars(market.symbol, self.timeframe, since, now)
-                if market.feed.has_live_spread:
-                    spread = await market.feed.spread_pct(market.symbol)
-                    if spread is not None:
-                        self.spreads.update(market.venue.id, market.symbol, spread)
             except Exception as exc:
                 log.warning("fallo al pedir datos", market=market.label, error=str(exc))
                 continue
+            polled.setdefault(id(market.feed), (market.feed, []))[1].append(market)
             new_bars.extend(bars)
             self._store(market, bars)
+        await self._update_spreads(list(polled.values()))
         await self._process(new_bars, now, catch_up_after=None)
         await self._check_staleness(now)
+
+    async def _update_spreads(self, groups: list[tuple[LiveFeed, list[MarketRuntime]]]) -> None:
+        """Un único sondeo de spreads por feed (todos sus mercados en una petición)."""
+        for feed, markets in groups:
+            if not feed.has_live_spread:
+                continue
+            try:
+                spreads = await feed.spreads([m.symbol for m in markets])
+            except Exception as exc:
+                log.warning("fallo al pedir spreads", venue=feed.venue, error=str(exc))
+                continue
+            for market in markets:
+                if market.symbol in spreads:
+                    self.spreads.update(market.venue.id, market.symbol, spreads[market.symbol])
 
     async def _process(
         self, bars: list[Bar], now: datetime, *, catch_up_after: dict[str, datetime] | None
@@ -335,8 +348,14 @@ class LiveEngine:
             f"🟢 <b>invert.io</b> en marcha · modo <b>{self.mode.value}</b> · "
             f"velas {self.timeframe}"
         ]
+        by_strategy: dict[str, list[str]] = {}
         for market in self.markets:
-            lines.append(f"• {html(market.label)} → {html(market.strategy.id)}")
+            by_strategy.setdefault(market.strategy.id, []).append(market.symbol)
+        for strategy_id, symbols in by_strategy.items():
+            shown = ", ".join(symbols[:6]) + (
+                f" y {len(symbols) - 6} más" if len(symbols) > 6 else ""
+            )
+            lines.append(f"• {html(strategy_id)}: {len(symbols)} mercados ({html(shown)})")
         for venue in self.controller.status():
             lines.append(f"Capital {html(venue.venue)}: {money(venue.equity, venue.currency)}")
             for p in venue.positions:

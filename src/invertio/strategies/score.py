@@ -206,7 +206,8 @@ class ScoreStrategy(Strategy[ScoreParams]):
 
         in_position = ctx.position(bar.venue, bar.symbol).is_open
         crossed_up = prev_score < p.entry_score <= result.score
-        if not in_position and crossed_up and result.tradable and result.atr > 0:
+        stop_ok = result.atr > 0 and result.stop_loss > 0  # stop positivo: riesgo acotado
+        if not in_position and crossed_up and result.tradable and stop_ok:
             return [
                 Signal(
                     strategy_id=self.id,

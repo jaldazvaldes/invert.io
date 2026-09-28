@@ -114,7 +114,7 @@ export function ScannerCard({ scan, onStart, starting }: Props) {
                       {row.meets ? (
                         <span className="pill ok">cumple</span>
                       ) : !row.tradable ? (
-                        <span className="pill warn">no cubre costes</span>
+                        <span className="pill warn">volatilidad insuficiente</span>
                       ) : null}
                     </td>
                   </tr>

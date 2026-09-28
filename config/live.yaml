@@ -1,16 +1,21 @@
 # Modo en vivo: qué mercados se vigilan y con qué estrategia (una por mercado).
-# Las estrategias de ejemplo pierden dinero tras costes en el backtest de 1 año:
-# aquí sirven para probar el sistema en paper, no para usar dinero real.
+# Las estrategias actuales pierden dinero tras costes en el backtest de 1 año:
+# aquí sirven para vigilar el mercado y probar el sistema en paper, no para usar dinero real.
 
 initial_cash: # capital simulado del modo paper, en la moneda de cada venue
   revolutx: 100
   trading212: 100
 
+timeframe: 1h # velas de 1 hora: en backtest, las que menos pierden por comisiones
+
+# Todos los pares al contado en EUR de Revolut X (sin stablecoins), con su precisión real.
+universe:
+  venue: revolutx
+  strategy: puntuacion
+  exclude: [] # p. ej. ["TRUMP/EUR", "PENGU/EUR"] para no vigilar alguno
+
+# Mercados con una estrategia concreta (tienen prioridad sobre el universo).
 markets:
-  - market: revolutx:BTC/EUR
-    strategy: rsi_reversion
-  - market: revolutx:ETH/EUR
-    strategy: rsi_reversion
   - market: trading212:AAPL # necesita claves de Alpaca para los datos; sin ellas se omite
     strategy: rsi_reversion
 

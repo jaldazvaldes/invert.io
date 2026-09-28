@@ -55,6 +55,11 @@ class VenueConfig(_Strict):
     simulation: SimulationConfig
     instrument: InstrumentRules
     instrument_overrides: dict[str, InstrumentRules] = Field(default_factory=dict)
+    # Spread/deslizamiento propios de algunos símbolos (las monedas pequeñas tienen más).
+    simulation_overrides: dict[str, SimulationConfig] = Field(default_factory=dict)
+
+    def simulation_for(self, symbol: str) -> SimulationConfig:
+        return self.simulation_overrides.get(symbol, self.simulation)
 
     def instrument_for(self, symbol: str) -> Instrument:
         rules = self.instrument_overrides.get(symbol, self.instrument)

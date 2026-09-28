@@ -43,7 +43,7 @@ export function Header({ status, connected, busy, onPause, onResume, onPanic }: 
             {state.text}
           </span>
         ) : (
-          <span className="pill">Motor parado</span>
+          <span className="pill">Paper clásico detenido</span>
         )}
         <span
           className={`pill ${connected ? "ok" : ""}`}

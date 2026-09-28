@@ -7,10 +7,13 @@ vela. Con velas de 1 a 15 minutos es más que suficiente.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Any, Protocol
 
 import httpx
+from ccxt.base.decimal_to_precision import TICK_SIZE
 
+from invertio.config.app_config import InstrumentRules
 from invertio.core.clock import Clock
 from invertio.core.models import Bar
 from invertio.data.alpaca_history import download_alpaca_bars
@@ -31,7 +34,9 @@ class LiveFeed(Protocol):
         """Velas cerradas con `open_time` >= `since`."""
         ...
 
-    async def spread_pct(self, symbol: str) -> float | None: ...
+    async def spreads(self, symbols: list[str]) -> dict[str, float]:
+        """Spread actual (en %) de cada símbolo que lo tenga disponible."""
+        ...
 
     async def close(self) -> None: ...
 
@@ -52,13 +57,41 @@ class CcxtLiveFeed:
             self._exchange, symbol, timeframe, since, now, venue=self.venue, now=now
         )
 
-    async def spread_pct(self, symbol: str) -> float | None:
-        book = await self._exchange.fetch_order_book(symbol, limit=5)
-        if not book.get("bids") or not book.get("asks"):
-            return None
-        bid, ask = float(book["bids"][0][0]), float(book["asks"][0][0])
-        mid = (bid + ask) / 2
-        return (ask - bid) / mid * 100 if mid > 0 else None
+    async def spreads(self, symbols: list[str]) -> dict[str, float]:
+        """Una sola petición para todos los símbolos (Revolut X admite 1 petición/s)."""
+        tickers = await self._exchange.fetch_tickers(symbols)
+        result = {}
+        for symbol, ticker in tickers.items():
+            bid, ask = ticker.get("bid"), ticker.get("ask")
+            if bid and ask and ask >= bid:
+                mid = (float(bid) + float(ask)) / 2
+                result[symbol] = (float(ask) - float(bid)) / mid * 100
+        return result
+
+    async def instrument_rules(self, symbols: list[str]) -> dict[str, InstrumentRules]:
+        """Precisión de precio y cantidad y mínimos reales de cada mercado, según el exchange."""
+        markets = await self._exchange.load_markets()
+        tick_size = self._exchange.precisionMode == TICK_SIZE
+        rules = {}
+        for symbol in symbols:
+            market = markets.get(symbol)
+            if market is None:
+                continue
+            precision, limits = market.get("precision") or {}, market.get("limits") or {}
+            price, amount = precision.get("price"), precision.get("amount")
+            if not price or not amount:
+                continue
+
+            def step(value: float) -> Decimal:
+                return Decimal(str(value)) if tick_size else Decimal(1).scaleb(-int(value))
+
+            rules[symbol] = InstrumentRules(
+                price_step=step(price),
+                amount_step=step(amount),
+                min_amount=Decimal(str((limits.get("amount") or {}).get("min") or 0)),
+                min_notional=Decimal(str((limits.get("cost") or {}).get("min") or 0)),
+            )
+        return rules
 
     async def symbols(self, quote: str) -> list[str]:
         """Mercados al contado activos que cotizan en `quote` (p. ej. todos los pares en EUR),
@@ -108,8 +141,8 @@ class AlpacaLiveFeed:
             delay=timedelta(0),
         )
 
-    async def spread_pct(self, symbol: str) -> float | None:
-        return None
+    async def spreads(self, symbols: list[str]) -> dict[str, float]:
+        return {}
 
     async def close(self) -> None:
         await self._client.aclose()

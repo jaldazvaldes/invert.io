@@ -1,18 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import {
   ApiError,
   connectLive,
   get,
   post,
   type Activity,
+  type AnalysisStatus,
+  type AnalysisSummary,
   type Backtest,
+  type LabSummary,
   type ScanState,
   type Score,
   type Status,
   type Trade,
 } from "./api";
 import { ActivityCard } from "./components/Activity";
+import { AnalysisDashboard } from "./components/Analysis";
 import {
   BacktestsCard,
   MarketsCard,
@@ -24,7 +28,12 @@ import {
 import { EquityChart, PriceChart } from "./components/Charts";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { Header } from "./components/Header";
+import { LabCard } from "./components/Lab";
 import { ScannerCard } from "./components/Scanner";
+
+const ManualTradingPanel = lazy(() => import("./components/ManualTrading").then((module) => ({ default: module.ManualTradingPanel })));
+const SimulationPanel = lazy(() => import("./components/SimulationPanel").then((module) => ({ default: module.SimulationPanel })));
+const ExperimentsPanel = lazy(() => import("./components/ExperimentsPanel").then((module) => ({ default: module.ExperimentsPanel })));
 
 interface Toast {
   text: string;
@@ -34,6 +43,54 @@ interface Toast {
 export function App() {
   const queryClient = useQueryClient();
   const [connected, setConnected] = useState(false);
+  const [view, setView] = useState<"analysis" | "simulation" | "experiments" | "manual" | "paper" | null>(null);
+  const analysisStatus = useQuery({
+    queryKey: ["analysis", "status"],
+    queryFn: () => get<AnalysisStatus>("/api/analysis/status"),
+    refetchInterval: 5_000,
+    retry: false,
+  });
+  const analysisSummary = useQuery({
+    queryKey: ["analysis", "summary", "all"],
+    queryFn: () => get<AnalysisSummary>("/api/analysis/summary"),
+    refetchInterval: 60_000,
+    retry: false,
+  });
+  const activeView = view ?? (analysisStatus.data?.available || analysisSummary.data?.total ? "analysis" : "paper");
+
+  useEffect(
+    () => connectLive((message) => {
+      const refresh = (...keys: string[]) =>
+        keys.forEach((key) => void queryClient.invalidateQueries({ queryKey: [key] }));
+      switch (message.type) {
+        case "analysis": refresh("analysis", "simulation", "experiments"); break;
+        case "bar": refresh("status", "scores", "bars"); break;
+        case "signal":
+        case "order": refresh("activity", "status"); break;
+        case "fill": refresh("activity", "status", "trades", "bars", "equity"); break;
+        case "state": refresh("status"); break;
+        case "scan": refresh("scan"); break;
+        case "hello": refresh("status", "analysis", "simulation", "experiments"); break;
+      }
+    }, setConnected),
+    [queryClient],
+  );
+
+  return <div className="app">
+    <nav className="workspace-tabs tabs" aria-label="Modo de invert.io">
+      <button className={`tab ${activeView === "analysis" ? "active" : ""}`} aria-current={activeView === "analysis" ? "page" : undefined} onClick={() => setView("analysis")}>Análisis</button>
+      <button className={`tab ${activeView === "simulation" ? "active" : ""}`} aria-current={activeView === "simulation" ? "page" : undefined} onClick={() => setView("simulation")}>Simulación</button>
+      <button className={`tab ${activeView === "experiments" ? "active" : ""}`} aria-current={activeView === "experiments" ? "page" : undefined} onClick={() => setView("experiments")}>Estrategias</button>
+      <button className={`tab ${activeView === "manual" ? "active" : ""}`} aria-current={activeView === "manual" ? "page" : undefined} onClick={() => setView("manual")}>Operar</button>
+      <button className={`tab ${activeView === "paper" ? "active" : ""}`} aria-current={activeView === "paper" ? "page" : undefined} onClick={() => setView("paper")}>Paper y laboratorio</button>
+    </nav>
+    {!view && (analysisStatus.isPending || analysisSummary.isPending) ? <p className="empty" role="status">Conectando con invert.io…</p> :
+      activeView === "analysis" ? <AnalysisDashboard status={analysisStatus.data} statusError={analysisStatus.error} connected={connected} /> : activeView === "simulation" ? <Suspense fallback={<p className="empty" role="status">Cargando simulación…</p>}><SimulationPanel /></Suspense> : activeView === "experiments" ? <Suspense fallback={<p className="empty" role="status">Cargando estrategias…</p>}><ExperimentsPanel /></Suspense> : activeView === "manual" ? <Suspense fallback={<p className="empty" role="status">Cargando operaciones manuales…</p>}><ManualTradingPanel /></Suspense> : <PaperDashboard connected={connected} onSimulation={() => setView("simulation")} />}
+  </div>;
+}
+
+function PaperDashboard({ connected, onSimulation }: { connected: boolean; onSimulation: () => void }) {
+  const queryClient = useQueryClient();
   const [market, setMarket] = useState<string | null>(null);
   const [equityVenue, setEquityVenue] = useState<string | null>(null);
   const [confirmPanic, setConfirmPanic] = useState(false);
@@ -66,46 +123,27 @@ export function App() {
     queryFn: () => get<Backtest[]>("/api/backtests"),
     refetchInterval: 120_000,
   });
+  const lab = useQuery({
+    queryKey: ["lab"],
+    queryFn: () => get<LabSummary | null>("/api/lab"),
+    refetchInterval: 60_000,
+  });
   const scan = useQuery({
     queryKey: ["scan"],
     queryFn: () => get<ScanState>("/api/scan"),
     refetchInterval: (query) => (query.state.data?.status === "running" ? 1_500 : false),
   });
 
-  // Eventos en tiempo real: cada tipo refresca solo lo que cambia.
-  useEffect(
-    () =>
-      connectLive((message) => {
-        const refresh = (...keys: string[]) =>
-          keys.forEach((key) => void queryClient.invalidateQueries({ queryKey: [key] }));
-        switch (message.type) {
-          case "bar":
-            refresh("status", "scores", "bars");
-            break;
-          case "signal":
-          case "order":
-            refresh("activity", "status");
-            break;
-          case "fill":
-            refresh("activity", "status", "trades", "bars", "equity");
-            break;
-          case "state":
-            refresh("status");
-            break;
-          case "scan":
-            refresh("scan");
-            break;
-          case "hello":
-            refresh("status");
-            break;
-        }
-      }, setConnected),
-    [queryClient],
-  );
-
   const markets = status.data?.markets ?? [];
   const venues = status.data?.venues ?? [];
-  const selectedMarket = market ?? markets[0]?.market ?? null;
+  // Por defecto: una moneda con posición abierta; si no hay, BTC; si no, la primera.
+  const openPosition = venues.flatMap((v) => v.positions)[0]?.market;
+  const selectedMarket =
+    market ??
+    openPosition ??
+    markets.find((m) => m.market.endsWith(":BTC/EUR"))?.market ??
+    markets[0]?.market ??
+    null;
   const selectedVenue = equityVenue ?? venues[0]?.venue ?? null;
 
   const notify = useCallback((text: string, bad = false) => {
@@ -129,7 +167,7 @@ export function App() {
     );
 
   return (
-    <div className="app">
+    <div>
       <Header
         status={status.data}
         connected={connected}
@@ -145,13 +183,13 @@ export function App() {
 
       {status.isError && (
         <div className="banner bad" role="alert">
-          No se puede conectar con invert.io. ¿Está arrancado? Ejecuta <code>uv run invertio run</code>.
+          No se puede consultar el simulador clásico. Comprueba la conexión con invert.io.
         </div>
       )}
       {status.data && !running && (
         <div className="banner" role="status">
-          Motor parado: estás viendo el historial en solo lectura. Para vigilar los mercados en vivo
-          ejecuta <code>uv run invertio run</code>.
+          <span>Este es el historial del simulador clásico. La recogida de Análisis y la nueva Simulación automática tienen su propio estado.</span>
+          <button className="btn" onClick={onSimulation}>Ir a Simulación</button>
         </div>
       )}
       {status.data?.state === "halted" && (
@@ -166,19 +204,36 @@ export function App() {
         <section className="card" aria-labelledby="chart-title">
           <div className="card-head">
             <h2 id="chart-title">Gráfico</h2>
-            <div className="tabs" role="tablist" aria-label="Mercado">
-              {markets.map((m) => (
-                <button
-                  key={m.market}
-                  className="tab"
-                  role="tab"
-                  aria-selected={m.market === selectedMarket}
-                  onClick={() => setMarket(m.market)}
-                >
-                  {m.market.split(":")[1]}
-                </button>
-              ))}
-            </div>
+            {markets.length > 8 ? (
+              <select
+                className="select"
+                aria-label="Mercado del gráfico"
+                value={selectedMarket ?? ""}
+                onChange={(event) => setMarket(event.target.value)}
+              >
+                {[...markets]
+                  .sort((a, b) => a.market.localeCompare(b.market))
+                  .map((m) => (
+                    <option key={m.market} value={m.market}>
+                      {m.market.split(":")[1]}
+                    </option>
+                  ))}
+              </select>
+            ) : (
+              <div className="tabs" role="tablist" aria-label="Mercado">
+                {markets.map((m) => (
+                  <button
+                    key={m.market}
+                    className="tab"
+                    role="tab"
+                    aria-selected={m.market === selectedMarket}
+                    onClick={() => setMarket(m.market)}
+                  >
+                    {m.market.split(":")[1]}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           {selectedMarket ? (
             <PriceChart key={selectedMarket} market={selectedMarket} />
@@ -187,7 +242,14 @@ export function App() {
           )}
         </section>
         <div className="stack">
-          <ScoresCard scores={scores.data} running={running} />
+          <ScoresCard
+            scores={scores.data}
+            running={running}
+            onSelect={(m) => {
+              setMarket(m);
+              document.getElementById("chart-title")?.scrollIntoView({ behavior: "smooth" });
+            }}
+          />
           <MarketsCard
             markets={markets}
             running={running}
@@ -238,6 +300,9 @@ export function App() {
 
       <div className="section">
         <ScannerCard scan={scan.data} onStart={startScan} starting={action.isPending} />
+      </div>
+      <div className="section">
+        <LabCard lab={lab.data} />
       </div>
       <div className="section">
         <BacktestsCard backtests={backtests.data} />

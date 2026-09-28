@@ -67,7 +67,8 @@ class RsiReversion(Strategy[RsiReversionParams]):
 
         in_position = ctx.position(bar.venue, bar.symbol).is_open
         uptrend = trend is None or bar.close > trend
-        if not in_position and uptrend and prev < p.oversold <= rsi and atr > 0:
+        stop_ok = atr > 0 and bar.close > p.stop_atr * atr  # stop positivo: riesgo acotado
+        if not in_position and uptrend and prev < p.oversold <= rsi and stop_ok:
             return [
                 Signal(
                     strategy_id=self.id,

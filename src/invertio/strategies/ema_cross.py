@@ -65,7 +65,8 @@ class EmaCross(Strategy[EmaCrossParams]):
             return []
 
         in_position = ctx.position(bar.venue, bar.symbol).is_open
-        if not in_position and prev <= 0 < diff and atr > 0:
+        stop_ok = atr > 0 and bar.close > p.stop_atr * atr  # stop positivo: riesgo acotado
+        if not in_position and prev <= 0 < diff and stop_ok:
             return [
                 Signal(
                     strategy_id=self.id,

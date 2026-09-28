@@ -12,6 +12,7 @@ export default defineConfig({
     proxy: {
       "/api": { target: backend, ws: true, changeOrigin: true },
       "/reports": { target: backend, changeOrigin: true },
+      "/lab": { target: backend, changeOrigin: true },
     },
   },
   build: { outDir: "dist", sourcemap: false },

@@ -56,6 +56,12 @@ const dateTime = new Intl.DateTimeFormat("es-ES", {
 });
 const timeOnly = new Intl.DateTimeFormat("es-ES", { hour: "2-digit", minute: "2-digit" });
 
+const dateOnly = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" });
+
+export function day(iso: string | null | undefined): string {
+  return iso ? dateOnly.format(new Date(iso)) : "—";
+}
+
 export function when(iso: string | null | undefined): string {
   return iso ? dateTime.format(new Date(iso)) : "—";
 }

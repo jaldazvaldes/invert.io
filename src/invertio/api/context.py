@@ -16,7 +16,11 @@ from invertio.config.settings import Settings
 from invertio.data.store import BarStore
 
 if TYPE_CHECKING:
+    from invertio.analysis.service import AnalysisService
+    from invertio.experiments.service import ExperimentsService
     from invertio.live.engine import LiveEngine
+    from invertio.manual.service import ManualService
+    from invertio.simulation.service import SimulationService
 
 
 @dataclass(slots=True)
@@ -41,6 +45,12 @@ class ApiContext:
     sessions: async_sessionmaker[AsyncSession]
     store: BarStore
     engine: LiveEngine | None = None
+    analysis: AnalysisService | None = None
+    manual: ManualService | None = None
+    simulation: SimulationService | None = None
+    experiments: ExperimentsService | None = None
+    execution_experiment: ExperimentsService | None = None
+    timeframe_experiment: ExperimentsService | None = None
     # Token de sesión: las acciones (pausa, pánico…) lo exigen en una cabecera. Otra web abierta
     # en el navegador no puede leerlo ni enviarlo, así que no puede pulsar botones por ti.
     token: str = field(default_factory=lambda: secrets.token_urlsafe(24))

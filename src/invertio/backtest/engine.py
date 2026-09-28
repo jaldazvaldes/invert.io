@@ -57,7 +57,11 @@ async def run_backtest(
     strategy: Strategy[Any],
     bars: list[Bar],
     initial_cash: Decimal,
+    *,
+    trade_from: datetime | None = None,
 ) -> BacktestResult:
+    """Con `trade_from`, las velas anteriores solo calientan los indicadores: no se opera ni
+    se mide hasta esa fecha (así el test no empieza con las medias vacías)."""
     if not bars:
         raise ValueError("No hay velas para el backtest")
     venue_ids = {b.venue for b in bars}
@@ -75,6 +79,9 @@ async def run_backtest(
     OrderRouter(bus, {venue.id: broker})
     StrategyRunner(bus, portfolio, {(venue.id, bars[0].symbol): strategy})
 
+    first_traded = next(
+        (b for b in bars if trade_from is None or b.close_time > trade_from), bars[-1]
+    )
     result = BacktestResult(
         strategy_id=strategy.id,
         venue=venue.id,
@@ -85,7 +92,7 @@ async def run_backtest(
         equity_curve=[],
         trades=[],
         open_position=None,
-        first_price=bars[0].open,
+        first_price=first_traded.open,
         last_price=bars[-1].close,
     )
 
@@ -104,9 +111,11 @@ async def run_backtest(
         for bar in group_bars:
             await broker.process_bar(bar)
         clock.set(group_bars[0].close_time)
+        trading = trade_from is None or group_bars[0].close_time > trade_from
         for bar in group_bars:
-            await bus.publish(BarClosed(bar))
-        result.equity_curve.append((clock.now(), portfolio.equity(venue.id)))
+            await bus.publish(BarClosed(bar, live=trading))
+        if trading:
+            result.equity_curve.append((clock.now(), portfolio.equity(venue.id)))
 
     result.final_equity = portfolio.equity(venue.id)
     result.trades = list(portfolio.closed_trades)

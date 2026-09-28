@@ -31,8 +31,8 @@ class FakeFeed:
             raise ConnectionError("sin red")
         return [b for b in self.bars[symbol] if since <= b.open_time and b.close_time <= now]
 
-    async def spread_pct(self, symbol: str) -> float | None:
-        return None
+    async def spreads(self, symbols: list[str]) -> dict[str, float]:
+        return {}
 
     async def close(self) -> None:
         pass

@@ -187,3 +187,24 @@ def test_websocket_origin_and_broadcast(
             assert ws.receive_json() == {"type": "hello", "running": False}
             hub.broadcast({"type": "state", "state": "paused", "reason": "prueba"})
             assert ws.receive_json()["state"] == "paused"
+
+
+async def test_lab_endpoint_returns_latest_run(
+    settings: Settings, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    async with _client(_context(settings, sessions, engine=None)) as client:
+        assert (await client.get("/api/lab")).json() is None
+        folder = settings.data_dir / "lab" / "20260928-150000"
+        folder.mkdir(parents=True)
+        candidates = [
+            {"strategy": "tendencia", "timeframe": "1d", "train_rank": 1, "verdict": "no aprueba"},
+            {"strategy": "tendencia", "timeframe": "1d", "train_rank": 2, "verdict": "no aprueba"},
+        ]
+        (folder / "summary.json").write_text(
+            json.dumps({"test_start": "2025-09-28", "candidates": candidates}), encoding="utf-8"
+        )
+        (folder / "report.html").write_text("<html>lab</html>", encoding="utf-8")
+        data = (await client.get("/api/lab")).json()
+        assert data["id"] == "20260928-150000"
+        assert [c["train_rank"] for c in data["candidates"]] == [1]  # solo la mejor de cada una
+        assert (await client.get(data["report_url"])).text == "<html>lab</html>"

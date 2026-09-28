@@ -1,0 +1,54 @@
+# Laboratorio de estrategias.
+# Cada estrategia se optimiza en el periodo de ENTRENAMIENTO con los mismos parámetros para
+# todas las monedas, y se juzga en el periodo de TEST (el último año), que no ha visto.
+# Los criterios de aprobado se fijan aquí ANTES de ver los resultados.
+
+source: myokx # históricos de 1h (descárgalos con: invertio lab download)
+venue: revolutx # se simula operar en Revolut X: sus comisiones, precisión y spreads reales
+base_timeframe: 1h
+history_days: 1095 # hasta 3 años de historia
+test_days: 365 # el último año es el test (fuera de muestra)
+min_train_days: 180 # una moneda necesita al menos esto en cada periodo para participar
+min_test_days: 180
+capital: 100
+
+verdict: # aprobado solo si en TEST se cumple todo (y el entrenamiento también fue positivo)
+  min_median_return_pct: 0 # mediana del retorno neto por moneda por encima de 0
+  min_positive_pct: 55 # al menos este % de monedas en positivo
+  min_avg_trades: 5 # operaciones medias por moneda (con menos, el resultado es azar)
+
+strategies:
+  tendencia:
+    timeframes: [1h, 4h, 1d]
+    grid:
+      ema: [50, 100, 200]
+      exit_buffer_atr: [0, 1, 2]
+      stop_atr: [3, 6]
+  ruptura:
+    timeframes: [1h, 4h, 1d]
+    grid:
+      entry_bars: [20, 55, 100]
+      exit_bars: [10, 20, 50]
+      stop_atr: [2, 4]
+  puntuacion:
+    timeframes: [1h, 4h]
+    grid:
+      entry_score: [60, 70, 80]
+      exit_score: [30, 45]
+      stop_atr: [1.5, 3]
+      take_profit_atr: [null, 4]
+      min_atr_pct: [0.15, 0.5]
+  ema_cross:
+    timeframes: [1h, 4h]
+    grid:
+      fast: [9, 21]
+      slow: [50, 100, 200]
+      stop_atr: [2, 4]
+      take_profit_atr: [null, 4]
+  rsi_reversion:
+    timeframes: [1h, 4h]
+    grid:
+      oversold: [25, 30, 35]
+      exit_above: [50, 60]
+      stop_atr: [2, 3]
+      trend_ema: [null, 200]

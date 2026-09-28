@@ -195,4 +195,25 @@ class RollingMax:
         return self.value
 
 
-__all__ = ["ATR", "EMA", "MACD", "ROC", "RSI", "SMA", "RollingMax"]
+class RollingMin:
+    """Mínimo de las últimas `period` observaciones."""
+
+    def __init__(self, period: int) -> None:
+        if period < 1:
+            raise ValueError("El periodo debe ser >= 1")
+        self.period = period
+        self._window: deque[float] = deque(maxlen=period)
+        self.value: float | None = None
+
+    @property
+    def ready(self) -> bool:
+        return self.value is not None
+
+    def update(self, x: float) -> float | None:
+        self._window.append(x)
+        if len(self._window) == self.period:
+            self.value = min(self._window)
+        return self.value
+
+
+__all__ = ["ATR", "EMA", "MACD", "ROC", "RSI", "SMA", "RollingMax", "RollingMin"]

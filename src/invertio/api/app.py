@@ -102,7 +102,25 @@ class ScanRequest(BaseModel):
 
 
 def create_app(ctx: ApiContext, hub: EventHub | None = None) -> FastAPI:
+    from invertio.analysis.api import register_analysis_routes
+    from invertio.experiments.api import register_experiment_routes
+    from invertio.manual.api import register_manual_routes
+    from invertio.simulation.api import register_simulation_routes
+
     app = FastAPI(title="invert.io", docs_url=None, redoc_url=None, openapi_url=None)
+    register_analysis_routes(app, ctx)
+    register_manual_routes(app, ctx)
+    register_simulation_routes(app, ctx)
+    register_experiment_routes(app, ctx)
+    register_experiment_routes(
+        app, ctx, prefix="/api/execution-experiment", service_attr="execution_experiment",
+        repository_key="execution-comparison-v1", filename="prueba-costes-operaciones.csv",
+        include_maker_orders=True,
+    )
+    register_experiment_routes(
+        app, ctx, prefix="/api/timeframe-experiment", service_attr="timeframe_experiment",
+        repository_key="timeframes-v1", filename="estrategias-10min-1h.csv",
+    )
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
     hub = hub or EventHub()
 
@@ -560,6 +578,26 @@ def create_app(ctx: ApiContext, hub: EventHub | None = None) -> FastAPI:
             )
         return result
 
+    @app.get("/api/lab")
+    async def lab() -> dict[str, Any] | None:
+        """Resultado del último laboratorio (la mejor combinación de cada estrategia)."""
+        root = ctx.settings.data_dir / "lab"
+        runs = sorted(root.glob("*/summary.json"), reverse=True) if root.exists() else []
+        if not runs:
+            return None
+        summary = json.loads(runs[0].read_text(encoding="utf-8"))
+        return {
+            "id": runs[0].parent.name,
+            "report_url": f"/lab/{runs[0].parent.name}/report.html",
+            "test_start": summary.get("test_start"),
+            "finished_at": summary.get("finished_at"),
+            "verdict_rules": summary.get("verdict_rules"),
+            "symbols_train": len(summary.get("symbols_train", [])),
+            "symbols_test": len(summary.get("symbols_test", [])),
+            "backtests": summary.get("backtests"),
+            "candidates": [c for c in summary.get("candidates", []) if c.get("train_rank") == 1],
+        }
+
     # --- tiempo real ---------------------------------------------------------------------
 
     @app.websocket("/api/ws")
@@ -585,6 +623,9 @@ def create_app(ctx: ApiContext, hub: EventHub | None = None) -> FastAPI:
     reports = ctx.settings.data_dir / "reports"
     reports.mkdir(parents=True, exist_ok=True)
     app.mount("/reports", StaticFiles(directory=reports), name="reports")
+    lab_dir = ctx.settings.data_dir / "lab"
+    lab_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/lab", StaticFiles(directory=lab_dir), name="lab")
     if (FRONTEND_DIST / "index.html").is_file():
         app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="panel")
     else:

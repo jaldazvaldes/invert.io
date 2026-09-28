@@ -13,7 +13,7 @@ from invertio.api.context import ApiContext
 from invertio.api.hub import EventHub
 from invertio.api.server import build_server, port_available
 from invertio.config.app_config import AppConfig
-from invertio.config.live_config import LiveConfig
+from invertio.config.live_config import LiveConfig, expand_universe
 from invertio.config.settings import Settings
 from invertio.core.clock import LiveClock
 from invertio.core.models import AssetClass
@@ -66,6 +66,26 @@ def build_markets(
     return markets
 
 
+async def resolve_universe(
+    config: AppConfig, live: LiveConfig, warn: Callable[[str], None]
+) -> tuple[AppConfig, LiveConfig]:
+    """Si live.yaml tiene `universe`, pide al exchange todos sus pares y su precisión real."""
+    if live.universe is None:
+        return config, live
+    venue = config.venue(live.universe.venue)
+    feed = CcxtLiveFeed(venue.id, venue.id)
+    try:
+        symbols = await feed.symbols(venue.quote_currency)
+        explicit = [m.symbol for m in live.markets if m.venue == venue.id]
+        rules = await feed.instrument_rules(sorted({*symbols, *explicit}))
+    finally:
+        await feed.close()
+    config, live = expand_universe(config, live, symbols, rules)
+    count = sum(1 for m in live.markets if m.venue == venue.id)
+    warn(f"Universo {venue.id}: {count} mercados en {venue.quote_currency} vigilados")
+    return config, live
+
+
 async def run_live(
     settings: Settings,
     config: AppConfig,
@@ -76,6 +96,7 @@ async def run_live(
     panel: bool = True,
 ) -> None:
     upgrade_db(settings)
+    config, live = await resolve_universe(config, live, warn)
     markets = build_markets(settings, config, live, warn)
     if not markets:
         raise ValueError("Ningún mercado de live.yaml se puede usar")

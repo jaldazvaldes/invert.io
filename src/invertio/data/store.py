@@ -123,7 +123,11 @@ class BarStore:
     def datasets(self) -> list[DatasetInfo]:
         infos = []
         for path in sorted(self.root.glob("*/*/*.parquet")):
-            symbol = path.parent.name.replace("-", "/", 1) if "-" in path.parent.name else path.parent.name
+            symbol = (
+                path.parent.name.replace("-", "/", 1)
+                if "-" in path.parent.name
+                else path.parent.name
+            )
             info = self._info(path, path.parent.parent.name, symbol, path.stem)
             if info is not None:
                 infos.append(info)

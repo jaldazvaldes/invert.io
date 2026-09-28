@@ -118,3 +118,9 @@ class AuditLogRow(Base):
     data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
     __table_args__ = (Index("ix_audit_mode_ts", "mode", "ts"),)
+
+
+# Register additive analysis tables on the same metadata after Base and paper models exist.
+from invertio.persistence import analysis_models as _analysis_models  # noqa: E402, F401
+from invertio.persistence import manual_models as _manual_models  # noqa: E402, F401
+from invertio.persistence import simulation_models as _simulation_models  # noqa: E402, F401

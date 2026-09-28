@@ -7,12 +7,14 @@ from typing import Any
 
 from invertio.config.app_config import read_yaml
 from invertio.strategies.base import Strategy, StrategyContext, StrategyParams
+from invertio.strategies.breakout import BreakoutStrategy
 from invertio.strategies.ema_cross import EmaCross
 from invertio.strategies.rsi_reversion import RsiReversion
 from invertio.strategies.score import ScoreStrategy
+from invertio.strategies.trend import TrendStrategy
 
 STRATEGIES: dict[str, type[Strategy[Any]]] = {
-    s.id: s for s in (EmaCross, RsiReversion, ScoreStrategy)
+    s.id: s for s in (EmaCross, RsiReversion, ScoreStrategy, TrendStrategy, BreakoutStrategy)
 }
 
 
