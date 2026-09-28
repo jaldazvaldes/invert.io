@@ -1,0 +1,8 @@
+# Reversión a la media con RSI y filtro de tendencia. Estrategia de ejemplo para validar el sistema.
+rsi_period: 14
+oversold: 30 # compra cuando el RSI sube por encima de este nivel
+exit_above: 55 # cierra cuando el RSI supera este nivel
+atr_period: 14
+stop_atr: 2.0
+take_profit_atr: null
+trend_ema: 200 # solo compra con el precio por encima de la EMA200 (null para desactivar)

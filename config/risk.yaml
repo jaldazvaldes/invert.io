@@ -1,0 +1,13 @@
+# Límites de riesgo duros, aplicados a cada señal antes de convertirla en orden.
+# Valores iniciales conservadores para las pruebas en paper: ajústalos tú.
+# Los porcentajes son sobre el capital (equity) de cada venue.
+
+max_risk_per_trade_pct: 0.5 # pérdida máxima si salta el stop-loss
+max_position_pct: 50 # tope del tamaño de una posición
+max_open_positions: 2
+max_daily_loss_pct: 3 # al alcanzarlo se detiene el trading hasta el día siguiente
+max_orders_per_hour: 20
+max_consecutive_losses: 3 # pausa tras N pérdidas seguidas
+max_spread_pct: 0.3 # no se entra si el spread supera este %
+prefer_post_only: true # órdenes límite maker (0 % en Revolut X) cuando se pueda
+day_timezone: Europe/Madrid # qué es "un día" para el límite de pérdida diaria

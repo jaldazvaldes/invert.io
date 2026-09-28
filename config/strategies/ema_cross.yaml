@@ -1,0 +1,6 @@
+# Cruce de EMAs con stop por ATR. Estrategia de ejemplo para validar el sistema.
+fast: 12
+slow: 26
+atr_period: 14
+stop_atr: 2.0 # stop-loss a 2 ATR por debajo del precio de entrada
+take_profit_atr: 3.0 # take-profit a 3 ATR (pon null para desactivarlo)

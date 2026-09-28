@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+
+# Secretos y claves
+.env
+*.pem
+*.key
+
+# Datos locales (SQLite, históricos, informes). Solo la carpeta de la raíz: src/invertio/data es código.
+/data/
+*.db
+*.db-wal
+*.db-shm
+
+# Frontend
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+
+# Editores / SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

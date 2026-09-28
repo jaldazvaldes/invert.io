@@ -1,0 +1,22 @@
+# Estrategia por puntuación (0-100). Cada factor suma entre 0 y su peso; los pesos suman 100.
+weights:
+  tendencia: 25 # precio sobre la EMA lenta y EMA rápida sobre la lenta
+  momentum: 20 # subida en las últimas `roc_bars` velas (fuerte si supera un ATR)
+  macd: 15 # histograma positivo y creciendo
+  rsi: 15 # zona sana 50-70; sobrecompra (>75) no suma
+  volumen: 10 # volumen por encima de su media
+  ruptura: 15 # cierre por encima del máximo de las últimas `breakout_bars` velas
+
+ema_fast: 50
+ema_trend: 200
+roc_bars: 12 # 12 velas de 5 min = 1 hora
+rsi_period: 14
+volume_period: 20
+breakout_bars: 48 # 4 horas con velas de 5 min
+atr_period: 14
+
+entry_score: 70 # compra cuando la nota cruza hacia arriba este valor
+exit_score: 40 # cierra cuando la nota cae a este valor o menos
+min_atr_pct: 0.15 # filtro de costes: movimiento típico por vela mínimo, en % del precio
+stop_atr: 2.0
+take_profit_atr: 3.0 # null para salir solo por nota o stop

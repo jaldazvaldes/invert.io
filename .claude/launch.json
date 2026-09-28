@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "invertio",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "invertio", "run"],
+      "port": 8000
+    },
+    {
+      "name": "invertio-panel",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "invertio", "panel"],
+      "port": 8000
+    }
+  ]
+}

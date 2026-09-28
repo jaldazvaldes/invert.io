@@ -1,0 +1,18 @@
+# Modo en vivo: qué mercados se vigilan y con qué estrategia (una por mercado).
+# Las estrategias de ejemplo pierden dinero tras costes en el backtest de 1 año:
+# aquí sirven para probar el sistema en paper, no para usar dinero real.
+
+initial_cash: # capital simulado del modo paper, en la moneda de cada venue
+  revolutx: 100
+  trading212: 100
+
+markets:
+  - market: revolutx:BTC/EUR
+    strategy: rsi_reversion
+  - market: revolutx:ETH/EUR
+    strategy: rsi_reversion
+  - market: trading212:AAPL # necesita claves de Alpaca para los datos; sin ellas se omite
+    strategy: rsi_reversion
+
+notify_rejections: false # true = avisar también de las señales que rechaza el riesgo
+stale_after_bars: 3 # aviso si un mercado pasa 3 velas sin datos nuevos

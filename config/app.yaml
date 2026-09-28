@@ -1,0 +1,45 @@
+# Venues donde opera invert.io. Comisiones en % (0.09 = 0,09 %), según la investigación de sept-2026.
+# Los símbolos son ejemplos para probar el sistema, no recomendaciones de inversión.
+
+venues:
+  - id: revolutx
+    kind: ccxt
+    asset_class: crypto
+    quote_currency: EUR
+    symbols: ["BTC/EUR", "ETH/EUR"]
+    supports_post_only: true
+    fees:
+      maker_pct: 0.0
+      taker_pct: 0.09
+    simulation:
+      spread_pct: 0.02 # medido el 28-sep-2026: 0,012 % en BTC/EUR y 0,014 % en ETH/EUR
+      slippage_pct: 0.02
+      limit_ttl_bars: 2
+    instrument: # Revolut X BTC/EUR: precio a 0,01 €, cantidad a 1e-8, importe mínimo 0,10 €
+      price_step: "0.01"
+      amount_step: "0.00000001"
+      min_notional: "0.10"
+
+  - id: trading212
+    kind: trading212
+    asset_class: stock
+    quote_currency: USD
+    symbols: ["AAPL", "MSFT"]
+    supports_post_only: false
+    fees:
+      maker_pct: 0.0
+      taker_pct: 0.0
+      fx_pct: 0.15 # cuenta en EUR operando acciones en USD: 0,15 % por lado
+    simulation:
+      spread_pct: 0.05 # supuesto prudente; se medirá en la fase 2
+      slippage_pct: 0.02
+      limit_ttl_bars: 2
+    instrument: # Trading 212: fracciones de acción, importe mínimo ~1
+      price_step: "0.01"
+      amount_step: "0.000001"
+      min_notional: "1"
+
+data:
+  timeframe: 5m
+  stocks_provider: alpaca
+  crypto_history_source: myokx # Revolut X solo guarda ~4 semanas de velas de 5m
