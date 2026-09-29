@@ -21,9 +21,14 @@ from invertio.backtest.metrics import compute_metrics
 from invertio.config.app_config import AppConfig
 from invertio.core.models import Bar
 from invertio.data.store import BarStore
+from invertio.lab.config import split_filter
 from invertio.lab.data import resample
 from invertio.logs import configure_logging
 from invertio.strategies import STRATEGIES
+from invertio.strategies.base import Strategy
+from invertio.strategies.regime import Regime, RegimeFiltered, btc_regime
+
+BTC_SYMBOL = "BTC/EUR"
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +68,7 @@ def init(
     configure_logging("WARNING")
     _CTX = _Context(config, BarStore(bars_root), source, venue, base_timeframe, capital)
     _bars.cache_clear()
+    _btc_regime.cache_clear()
 
 
 @lru_cache(maxsize=6)
@@ -71,6 +77,14 @@ def _bars(symbol: str, timeframe: str) -> tuple[tuple[Bar, ...], tuple[datetime,
     base = _CTX.store.read(_CTX.source, symbol, _CTX.base_timeframe, venue=_CTX.venue)
     bars = base if timeframe == _CTX.base_timeframe else resample(base, timeframe)
     return tuple(bars), tuple(b.open_time for b in bars)
+
+
+@lru_cache(maxsize=8)
+def _btc_regime(days: int) -> Regime:
+    """Filtro de BTC con toda su historia: no depende de la ventana de cada backtest."""
+    assert _CTX is not None
+    base = _CTX.store.read(_CTX.source, BTC_SYMBOL, _CTX.base_timeframe, venue=_CTX.venue)
+    return btc_regime(resample(base, "1d"), days)
 
 
 def run_task(task: LabTask) -> dict[str, Any]:
@@ -87,7 +101,10 @@ def run_task(task: LabTask) -> dict[str, Any]:
     if not window or window[-1].close_time <= task.trade_from:
         return {**base, "error": "sin velas en el periodo"}
     cls = STRATEGIES[task.strategy_id]
-    strategy = cls(cls.params_model.model_validate(dict(task.params)))
+    params, btc_days = split_filter(dict(task.params))
+    strategy: Strategy[Any] = cls(cls.params_model.model_validate(params))
+    if btc_days is not None:
+        strategy = RegimeFiltered(strategy, _btc_regime(btc_days))
     try:
         result = asyncio.run(
             run_backtest(_CTX.config, strategy, window, _CTX.capital, trade_from=task.trade_from)

@@ -53,8 +53,13 @@ class MakerSimulationEngine(SimulationEngine):
         *,
         pending_minutes: int = 5,
     ) -> None:
-        if isinstance(pending_minutes, bool) or pending_minutes not in {5, 15}:
-            raise ValueError("La caducidad maker debe ser de 5 o 15 minutos")
+        # 5 y 15 minutos en la prueba de costes; 8 horas (dos velas de 4 h) en otras carteras.
+        if (
+            isinstance(pending_minutes, bool)
+            or not isinstance(pending_minutes, int)
+            or not 1 <= pending_minutes <= 1440
+        ):
+            raise ValueError("La caducidad maker debe estar entre 1 minuto y 1 día")
         self.pending_minutes = pending_minutes
         model = {"version": "passive-buy-trade-through-v1", "pending_minutes": pending_minutes}
         if state is not None and state.get("maker_model") != model:

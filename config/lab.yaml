@@ -17,21 +17,26 @@ verdict: # aprobado solo si en TEST se cumple todo (y el entrenamiento también 
   min_positive_pct: 55 # al menos este % de monedas en positivo
   min_avg_trades: 5 # operaciones medias por moneda (con menos, el resultado es azar)
 
+# btc_filter: solo se compra si el cierre diario de BTC está por encima de su media de N días
+# (null = sin filtro). Cada valor compite por separado para ver si el filtro ayuda.
 strategies:
   tendencia:
     timeframes: [1h, 4h, 1d]
+    btc_filter: [null, 50, 200]
     grid:
       ema: [50, 100, 200]
       exit_buffer_atr: [0, 1, 2]
       stop_atr: [3, 6]
   ruptura:
     timeframes: [1h, 4h, 1d]
+    btc_filter: [null, 50, 200]
     grid:
       entry_bars: [20, 55, 100]
       exit_bars: [10, 20, 50]
       stop_atr: [2, 4]
   puntuacion:
     timeframes: [1h, 4h]
+    btc_filter: [null, 50, 200]
     grid:
       entry_score: [60, 70, 80]
       exit_score: [30, 45]
@@ -40,6 +45,7 @@ strategies:
       min_atr_pct: [0.15, 0.5]
   ema_cross:
     timeframes: [1h, 4h]
+    btc_filter: [null, 50, 200]
     grid:
       fast: [9, 21]
       slow: [50, 100, 200]
@@ -47,8 +53,23 @@ strategies:
       take_profit_atr: [null, 4]
   rsi_reversion:
     timeframes: [1h, 4h]
+    btc_filter: [null, 50, 200]
     grid:
       oversold: [25, 30, 35]
       exit_above: [50, 60]
       stop_atr: [2, 3]
       trend_ema: [null, 200]
+
+# Rotación semanal (invertio lab rotation): una sola cartera que cada lunes se queda con las
+# `top` monedas de mayor rentabilidad en `lookback_days` días (solo si es positiva) y vende
+# el resto; con el filtro de BTC apagado, todo a euros. Compras y ventas a mercado.
+rotation:
+  lookback_days: [7, 14, 28, 56, 91]
+  top: [3, 5]
+  btc_filter: [null, 50, 200]
+  rebalance_days: 7
+  fee_pct: 0.09
+  verdict: # fijado antes de ver resultados
+    min_return_pct: 0 # retorno positivo en entrenamiento y en test
+    beat_btc: true # en test, más que comprar y mantener BTC
+    min_trades: 20 # compras + ventas en el test

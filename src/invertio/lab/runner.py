@@ -16,7 +16,7 @@ from invertio.config.app_config import AppConfig, InstrumentRules, SimulationCon
 from invertio.core.timeframes import timeframe_delta
 from invertio.data.store import BarStore, DatasetInfo
 from invertio.lab import worker
-from invertio.lab.config import LabConfig
+from invertio.lab.config import BTC_FILTER, LabConfig, split_filter
 from invertio.lab.worker import LabTask
 from invertio.strategies import STRATEGIES
 
@@ -120,7 +120,7 @@ def lab_app_config(
 
 def _warmup(strategy_id: str, params: dict[str, Any], timeframe: str) -> timedelta:
     cls = STRATEGIES[strategy_id]
-    strategy = cls(cls.params_model.model_validate(params))
+    strategy = cls(cls.params_model.model_validate(split_filter(params)[0]))
     return (strategy.warmup_bars + 5) * timeframe_delta(timeframe)
 
 
@@ -261,16 +261,17 @@ def run_lab(
     for row in train_rows:
         grouped[_key(row)].append(row)
     table = []
-    by_group: dict[tuple[str, str], list[tuple[Key, Aggregate]]] = defaultdict(list)
+    # Con y sin filtro de BTC compiten por separado: así se ve si el filtro ayuda.
+    by_group: dict[tuple[str, str, Any], list[tuple[Key, Aggregate]]] = defaultdict(list)
     for key, rows in grouped.items():
         agg = Aggregate.of(rows)
-        by_group[(key[0], key[1])].append((key, agg))
+        by_group[(key[0], key[1], dict(key[2]).get(BTC_FILTER))].append((key, agg))
         table.append(
             {"strategy": key[0], "timeframe": key[1], "params": dict(key[2]), **asdict(agg)}
         )
 
     candidates: list[Candidate] = []
-    for (strategy_id, timeframe), items in by_group.items():
+    for (strategy_id, timeframe, _), items in by_group.items():
         # Se priorizan las combinaciones con operaciones suficientes para juzgarlas.
         items.sort(
             key=lambda item: (

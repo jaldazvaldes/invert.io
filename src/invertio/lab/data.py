@@ -38,8 +38,14 @@ async def download_many(
     *,
     venue: str,
     on_symbol: Callable[[str, int, int], None] | None = None,
+    full: bool = False,
 ) -> dict[str, int]:
-    """Descarga (incremental) `days` días de velas de cada símbolo. Devuelve velas guardadas."""
+    """Descarga (incremental) `days` días de velas de cada símbolo. Devuelve velas guardadas.
+
+    Lo ya guardado se da por completo desde su primera vela: muchas monedas empezaron a
+    cotizar después del inicio de la ventana y no hay historia anterior que pedir. Con
+    `full=True` se vuelve a pedir toda la ventana (p. ej. tras ampliar `history_days`).
+    """
     exchange = create_exchange(source_id)
     now = datetime.now(UTC)
     start = now - timedelta(days=days)
@@ -48,7 +54,7 @@ async def download_many(
         for index, symbol in enumerate(symbols, start=1):
             info = store.info(source_id, symbol, timeframe)
             first = start
-            if info is not None and info.first <= start + timedelta(days=2):
+            if info is not None and not full:
                 first = max(start, info.last + timeframe_delta(timeframe))
             bars = await download_ohlcv(
                 exchange, symbol, timeframe, first, now, venue=venue, now=now

@@ -384,6 +384,13 @@ def analyze(
             help="Las cuatro estrategias con velas de 10 min y 1 h: ocho carteras ficticias.",
         ),
     ] = False,
+    lab_trial: Annotated[
+        bool,
+        typer.Option(
+            "--lab-trial",
+            help="Estrategias aprobadas en el laboratorio (velas de 4 h), 50 € ficticios.",
+        ),
+    ] = False,
 ) -> None:
     """Analiza Revolut X; --manual-orders habilita los botones de órdenes reales."""
     from invertio.analysis.app import run_analysis
@@ -420,11 +427,17 @@ def analyze(
                 "[cyan]Velas de 10 min y 1 h: 8 × 50 € ficticios con las mismas cuatro "
                 "estrategias.[/cyan]"
             )
+        if lab_trial:
+            console.print(
+                "[cyan]Estrategias del laboratorio: velas de 4 h, compras maker, "
+                "50 € ficticios por cuenta.[/cyan]"
+            )
         asyncio.run(run_analysis(settings, config, analysis, panel=panel, telegram_enabled=telegram,
                                  max_cycles=cycles, manual_orders=manual_orders,
                                  simulate=simulate, compare_strategies=compare_strategies,
                                  execution_trial=execution_trial,
                                  timeframe_trial=timeframe_trial,
+                                 lab_trial=lab_trial,
                                  warn=_warn))
     except KeyboardInterrupt:
         console.print("Análisis detenido; el historial se conserva.")
@@ -516,6 +529,9 @@ def lab_download(
     days: Annotated[
         int | None, typer.Option(help="Días de historia (por defecto lab.yaml).")
     ] = None,
+    full: Annotated[
+        bool, typer.Option("--full", help="Volver a pedir toda la ventana, no solo lo nuevo.")
+    ] = False,
 ) -> None:
     """Descarga la historia de todas las criptos en EUR comunes a Revolut X y la fuente."""
     from invertio.lab.config import load_lab_config
@@ -537,6 +553,7 @@ def lab_download(
                 store,
                 venue=lab.venue,
                 on_symbol=lambda s, i, n: status.update(f"Descargando {s} ({i}/{n})…"),
+                full=full,
             )
 
     totals = asyncio.run(run())
@@ -602,6 +619,62 @@ def lab_run(
     print_lab(console, result, lab)
     folder = save_lab(settings.data_dir / "lab", result, lab)
     console.print(f"Informe: {folder.resolve() / 'report.html'}")
+
+
+@lab_app.command("rotation")
+def lab_rotation() -> None:
+    """Rotación semanal por momento: una cartera con las monedas más fuertes de cada semana."""
+    from invertio.lab.config import load_lab_config
+    from invertio.lab.data import resample
+    from invertio.lab.report import print_rotation, save_rotation
+    from invertio.lab.rotation import daily_series, run_rotation
+    from invertio.live.feeds import CcxtLiveFeed
+
+    settings = _load_settings()
+    config = _load_app_config(settings)
+    lab = load_lab_config(settings.config_dir)
+    if lab.rotation is None:
+        console.print("[red]Falta la sección rotation en config/lab.yaml[/red]")
+        raise typer.Exit(code=1)
+    store = BarStore(settings.data_dir / "bars")
+    venue = config.venue(lab.venue)
+
+    async def spreads() -> tuple[list[str], dict[str, float]]:
+        feed = CcxtLiveFeed(lab.venue, lab.venue)
+        try:
+            listed = await feed.symbols(venue.quote_currency)
+            symbols = [s for s in listed if store.info(lab.source, s, lab.base_timeframe)]
+            return symbols, await feed.spreads(symbols)
+        finally:
+            await feed.close()
+
+    with console.status("Leyendo spreads reales de Revolut X…"):
+        symbols, measured = asyncio.run(spreads())
+    if "BTC/EUR" not in symbols:
+        console.print("[red]Falta la historia de BTC/EUR. Ejecuta: invertio lab download[/red]")
+        raise typer.Exit(code=1)
+    daily = {
+        s: resample(store.read(lab.source, s, lab.base_timeframe, venue=lab.venue), "1d")
+        for s in symbols
+    }
+    # Coste por lado sin comisión: medio spread real (con el mínimo del venue) + deslizamiento.
+    costs = {
+        s: max(measured.get(s, 0.0), venue.simulation.spread_pct) / 2
+        + venue.simulation.slippage_pct
+        for s in symbols
+    }
+    now = datetime.now(UTC)
+    result = run_rotation(
+        lab.rotation,
+        {s: daily_series(bars) for s, bars in daily.items()},
+        daily["BTC/EUR"],
+        costs=costs,
+        test_start=now - timedelta(days=lab.test_days),
+        end=now,
+    )
+    print_rotation(console, result, lab.rotation)
+    folder = save_rotation(settings.data_dir / "lab", result, lab.rotation)
+    console.print(f"Resultados: {folder.resolve() / 'summary.json'}")
 
 
 @paper_app.command("report")

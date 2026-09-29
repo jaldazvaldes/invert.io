@@ -2,7 +2,7 @@ import { get } from "./api";
 import type { SimulationConfig, SimulationDecision, SimulationEquity, SimulationStats, SimulationTrade } from "./simulation-api";
 
 export type ExperimentState = "starting" | "running" | "waiting_data" | "error" | "stopped";
-export type ExperimentTrial = "costs" | "original" | "timeframes";
+export type ExperimentTrial = "costs" | "original" | "timeframes" | "lab";
 
 export interface MakerOrder {
   id: string;
@@ -28,6 +28,8 @@ export interface ExperimentStrategy {
   execution?: "maker_entry" | "taker";
   timeframe_minutes?: number;
   base_strategy?: string;
+  btc_filter?: number | null;
+  lab_result?: { run: string; median_return_pct: number; positive_pct: number; trades_per_coin: number; median_trade_pct: number; buy_and_hold_pct: number };
   native_timeframe?: string;
   cooldown_minutes?: number;
   pending_minutes?: number;
@@ -75,6 +77,6 @@ export interface ExperimentsStatus {
   data_errors?: number;
 }
 
-const API_PATHS: Record<ExperimentTrial, string> = { costs: "/api/execution-experiment", original: "/api/experiments", timeframes: "/api/timeframe-experiment" };
+const API_PATHS: Record<ExperimentTrial, string> = { costs: "/api/execution-experiment", original: "/api/experiments", timeframes: "/api/timeframe-experiment", lab: "/api/lab-experiment" };
 export const experimentApiPath = (trial: ExperimentTrial) => API_PATHS[trial];
 export const getExperimentsStatus = (trial: ExperimentTrial = "original") => get<ExperimentsStatus>(`${experimentApiPath(trial)}/status`);

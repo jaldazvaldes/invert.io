@@ -224,6 +224,32 @@ nuevas velas de señal cerradas desde la activación. Los libros y cotizaciones 
 siendo recientes incluso entre cierres 5m. Todas las cuentas se valoran cada minuto usando
 el libro disponible y coste de venta taker, también las variantes maker.
 
+**Modelo maker:** coloca hipotéticamente una compra al mejor bid, redondeada al paso del
+mercado, reservando los 10 €. No se ejecuta con la instantánea que la creó. Solo un libro
+posterior, dentro de su vigencia, con cantidad suficiente estrictamente por debajo del límite
+permite modelar la compra completa al precio límite original. Tocar el precio o no tener
+profundidad suficiente deja la orden pendiente; no se simulan ejecuciones parciales. La orden
+caduca a los 5 minutos (1m) o 15 (5m). Los cambios de señal o filtros pueden cancelarla; si el
+libro posterior ya cumple el cruce, se modela primero esa entrada comprometida y después se
+evalúa la salida, sin eliminar compras desfavorables a posteriori.
+
+Este modelo de instantáneas **no conoce la prioridad de la cola ni acredita una ejecución
+real** y puede omitir ejecuciones entre consultas. Los huecos de datos se registran como
+incompletos; no se inventan fills durante un apagado. Una reserva pendiente no reduce el valor
+de la cuenta, pero limita su efectivo libre. Las cancelaciones/caducidades liberan la reserva.
+Las posiciones ya adquiridas mantienen los controles de interrupción del simulador original.
+
+El panel separa resultados cerrados antes de comisiones, comisiones y neto; muestra reservas,
+pendientes, ejecuciones modeladas, caducidades y cancelaciones. El resultado antes de comisiones
+conserva el spread/deslizamiento de los precios simulados; no equivale a una estrategia maker.
+Todos los cambios de las cuatro cuentas se guardan juntos bajo `simulation_state`, clave
+`execution-comparison-v1`, conservando reglas, fechas, órdenes, cursores y evidencia del libro.
+Reiniciar con el mismo comando continúa la prueba y no vuelve a aportar 50 €.
+
+Lecturas: `/api/execution-experiment/status`, `/export.csv` (posiciones y operaciones) y
+`/maker-orders.csv` (compras pendientes y finalizadas), estas dos últimas bajo el mismo prefijo.
+Los CSV aceptan `strategy_id`. El ensayo no envía órdenes al exchange ni cambia el historial paper.
+
 ## Estrategias con velas de 10 minutos y 1 hora
 
 ```powershell
@@ -250,31 +276,39 @@ activadas juntas. Las cuentas de 1 minuto no cambian ni reinician su historial.
   velas largas se construyen con las velas de 1 minuto que el análisis ya descarga (coinciden con
   las nativas); solo se piden de nuevo a Revolut X tras un hueco, con un tope de 15 s por ciclo.
 
-**Modelo maker:** coloca hipotéticamente una compra al mejor bid, redondeada al paso del
-mercado, reservando los 10 €. No se ejecuta con la instantánea que la creó. Solo un libro
-posterior, dentro de su vigencia, con cantidad suficiente estrictamente por debajo del límite
-permite modelar la compra completa al precio límite original. Tocar el precio o no tener
-profundidad suficiente deja la orden pendiente; no se simulan ejecuciones parciales. La orden
-caduca a los 5 minutos (1m) o 15 (5m). Los cambios de señal o filtros pueden cancelarla; si el
-libro posterior ya cumple el cruce, se modela primero esa entrada comprometida y después se
-evalúa la salida, sin eliminar compras desfavorables a posteriori.
+## Estrategias aprobadas en el laboratorio
 
-Este modelo de instantáneas **no conoce la prioridad de la cola ni acredita una ejecución
-real** y puede omitir ejecuciones entre consultas. Los huecos de datos se registran como
-incompletos; no se inventan fills durante un apagado. Una reserva pendiente no reduce el valor
-de la cuenta, pero limita su efectivo libre. Las cancelaciones/caducidades liberan la reserva.
-Las posiciones ya adquiridas mantienen los controles de interrupción del simulador original.
+```powershell
+$env:PANEL_PORT = '8001'
+uv run invertio analyze --all-markets --simulate --compare-strategies --execution-trial --timeframe-trial --lab-trial
+```
 
-El panel separa resultados cerrados antes de comisiones, comisiones y neto; muestra reservas,
-pendientes, ejecuciones modeladas, caducidades y cancelaciones. El resultado antes de comisiones
-conserva el spread/deslizamiento de los precios simulados; no equivale a una estrategia maker.
-Todos los cambios de las cuatro cuentas se guardan juntos bajo `simulation_state`, clave
-`execution-comparison-v1`, conservando reglas, fechas, órdenes, cursores y evidencia del libro.
-Reiniciar con el mismo comando continúa la prueba y no vuelve a aportar 50 €.
+En **Estrategias → Del laboratorio** corren, con 50 € ficticios cada una, las cinco
+combinaciones que aprobaron el laboratorio del 29/09/2026 (test: el último año, con las
+altcoins cayendo un 33 % de mediana). Usan las mismas clases y parámetros que el laboratorio:
 
-Lecturas: `/api/execution-experiment/status`, `/export.csv` (posiciones y operaciones) y
-`/maker-orders.csv` (compras pendientes y finalizadas), estas dos últimas bajo el mismo prefijo.
-Los CSV aceptan `strategy_id`. El ensayo no envía órdenes al exchange ni cambia el historial paper.
+| Cuenta | Velas | Filtro de BTC | Test en el laboratorio (mediana por moneda · % en positivo · ops/moneda) |
+| --- | --- | --- | --- |
+| Puntuación 4 h | 4 h | — | +0,7 % · 60 % · 25 |
+| Puntuación 4 h · BTC 50 días | 4 h | media de 50 días | +2,0 % · 62 % · 25 |
+| Puntuación 4 h · BTC 200 días | 4 h | media de 200 días | +1,7 % · 73 % · 7 |
+| Ruptura 1 h · BTC 50 días | 1 h | media de 50 días | +2,9 % · 60 % · 30 |
+| Ruptura 1 h · BTC 200 días | 1 h | media de 200 días | +2,1 % · 73 % · 7 |
+
+- Como en el laboratorio: compra con orden límite pasiva (0 %) que caduca a las dos velas, venta
+  inmediata (0,09 %), stop por ATR, salida por la señal de la estrategia, sin objetivo ni
+  caducidad. Stop y datos se revisan cada minuto con el libro de órdenes.
+- El filtro de BTC usa su cierre diario, formado con sus seis velas de 4 h de cada día UTC: las
+  velas diarias de Revolut X no se usan porque dejaron de actualizarse el 29/03/2026.
+- Al arrancar se cargan 1500 velas de 4 h y de 1 h por mercado (250 y 62 días); después se forman
+  con las velas de 1 minuto del análisis.
+- En el laboratorio la ruptura de 1 h sin filtro suspendía (−1,9 %) y con filtro aprueba: el
+  filtro evita comprar mientras BTC cae. Se probaron muchas combinaciones, así que alguna puede
+  haber aprobado por suerte: esta observación en vivo es la que decide.
+
+La rotación semanal por momento (`invertio lab rotation`) no aprobó: ganó en entrenamiento
+(+69 %, por debajo de mantener BTC, +104 %) y perdió un 42 % en el test (BTC: −25 %). Con el
+filtro de BTC salía peor. No está en esta pestaña.
 
 ## Prueba manual con 50 € en Revolut X
 
@@ -375,9 +409,21 @@ Busca qué reglas funcionan de verdad. Hay dos periodos:
 Los costes son los reales de Revolut X: comisiones, el spread de cada moneda y su precisión.
 
 ```bash
-uv run invertio lab download   # historia de las criptos comunes a Revolut X y OKX (~25 min)
+uv run invertio lab download   # historia de las criptos comunes a Revolut X y OKX (~25 min
+                               # la primera vez; después solo lo nuevo; --full para repetir)
 uv run invertio lab run        # rejillas de config/lab.yaml en todos los núcleos
+uv run invertio lab rotation   # rotación semanal por momento (una cartera con las más fuertes)
 ```
+
+**Filtro de BTC** (`btc_filter` en `config/lab.yaml`): cualquier estrategia puede probarse
+comprando solo cuando el último cierre diario de BTC está por encima de su media de N días
+(las ventas nunca se bloquean). Cada valor compite por separado, así que el informe muestra
+cada estrategia con y sin filtro.
+
+**Rotación semanal:** cada lunes se queda con las `top` monedas de mayor rentabilidad en
+`lookback_days` días (solo si es positiva) y vende las que salen del grupo; con el filtro de BTC
+apagado, todo a euros. Aprueba si gana en entrenamiento y en test y, en test, supera a mantener
+BTC. Solo incluye monedas que hoy cotizan en Revolut X (sesgo de supervivencia a su favor).
 
 Los criterios de aprobado están fijados de antemano en `config/lab.yaml`:
 - mediana de retorno neto positiva en el test;

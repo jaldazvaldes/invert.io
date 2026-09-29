@@ -51,6 +51,7 @@ class ApiContext:
     experiments: ExperimentsService | None = None
     execution_experiment: ExperimentsService | None = None
     timeframe_experiment: ExperimentsService | None = None
+    lab_experiment: ExperimentsService | None = None
     # Token de sesión: las acciones (pausa, pánico…) lo exigen en una cabecera. Otra web abierta
     # en el navegador no puede leerlo ni enviarlo, así que no puede pulsar botones por ti.
     token: str = field(default_factory=lambda: secrets.token_urlsafe(24))

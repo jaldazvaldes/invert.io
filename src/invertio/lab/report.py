@@ -12,7 +12,8 @@ from typing import Any
 from rich.console import Console
 from rich.table import Table
 
-from invertio.lab.config import LabConfig
+from invertio.lab.config import LabConfig, RotationConfig
+from invertio.lab.rotation import RotationResult, RotationRun
 from invertio.lab.runner import Candidate, LabResult
 
 
@@ -193,3 +194,80 @@ cada moneda y deslizamiento. Rendimientos simulados: no garantizan resultados fu
 <div class="wrap"><table><thead>{head}</thead><tbody>{other_rows}</tbody></table></div>
 </body></html>
 """
+
+
+def _run_dict(run: RotationRun) -> dict[str, Any]:
+    data = asdict(run)
+    data["equity"] = [(day.date().isoformat(), round(value, 4)) for day, value in run.equity]
+    return data
+
+
+def print_rotation(console: Console, result: RotationResult, config: RotationConfig) -> None:
+    v = config.verdict
+    console.print(
+        f"\n[bold]Rotación semanal por momento[/bold] · entrenamiento "
+        f"{result.train_start:%Y-%m-%d} → {result.test_start:%Y-%m-%d} · test hasta "
+        f"{result.end:%Y-%m-%d} · {len(result.symbols)} monedas · "
+        f"{len(result.train)} combinaciones"
+    )
+    console.print(
+        f"[dim]Aprueba si el retorno supera {v.min_return_pct:g} % en entrenamiento y en test"
+        + (", en test supera a mantener BTC" if v.beat_btc else "")
+        + f" y hace ≥ {v.min_trades} operaciones. Solo monedas que hoy cotizan en Revolut X "
+        "(sesgo de supervivencia).[/dim]"
+    )
+    table = Table(title="Mejores combinaciones del entrenamiento, juzgadas en test")
+    for column in ("rango", "parámetros", "entren.", "entren. caída", "test", "test caída",
+                   "test ops", "en cartera", "BTC", "todas por igual", "veredicto"):  # fmt: skip
+        table.add_column(
+            column, justify="left" if column in {"parámetros", "veredicto"} else "right"
+        )
+    for c in result.candidates:
+        color = "green" if c.verdict == "aprueba" else "red"
+        table.add_row(
+            str(c.train_rank),
+            _params(c.train.params),
+            _pct(c.train.return_pct),
+            f"{c.train.max_drawdown_pct:.1f} %".replace(".", ","),
+            _pct(c.test.return_pct),
+            f"{c.test.max_drawdown_pct:.1f} %".replace(".", ","),
+            str(c.test.trades),
+            f"{c.test.exposure_pct:.0f} %",
+            _pct(c.test.btc_return_pct),
+            _pct(c.test.equal_weight_return_pct),
+            f"[{color}]{c.verdict}[/{color}]",
+        )
+    console.print(table)
+    for c in result.candidates:
+        if c.reasons:
+            console.print(f"[dim]{c.train_rank}: {'; '.join(c.reasons)}[/dim]")
+
+
+def save_rotation(root: Path, result: RotationResult, config: RotationConfig) -> Path:
+    folder = root / f"{result.end:%Y%m%d-%H%M%S}-rotacion"
+    folder.mkdir(parents=True, exist_ok=True)
+    summary = {
+        "train_start": result.train_start.isoformat(),
+        "test_start": result.test_start.isoformat(),
+        "end": result.end.isoformat(),
+        "config": config.model_dump(mode="json"),
+        "symbols": result.symbols,
+        "candidates": [
+            {
+                "train_rank": c.train_rank,
+                "verdict": c.verdict,
+                "reasons": c.reasons,
+                "train": _run_dict(c.train),
+                "test": _run_dict(c.test),
+            }
+            for c in result.candidates
+        ],
+        "train_all": [
+            {k: v for k, v in _run_dict(run).items() if k not in {"equity", "log"}}
+            for run in result.train
+        ],
+    }
+    (folder / "summary.json").write_text(
+        json.dumps(summary, indent=1, ensure_ascii=False, default=str), encoding="utf-8"
+    )
+    return folder

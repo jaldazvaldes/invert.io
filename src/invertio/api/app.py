@@ -121,6 +121,11 @@ def create_app(ctx: ApiContext, hub: EventHub | None = None) -> FastAPI:
         app, ctx, prefix="/api/timeframe-experiment", service_attr="timeframe_experiment",
         repository_key="timeframes-v1", filename="estrategias-10min-1h.csv",
     )
+    register_experiment_routes(
+        app, ctx, prefix="/api/lab-experiment", service_attr="lab_experiment",
+        repository_key="lab-strategies-v1", filename="estrategias-laboratorio.csv",
+        include_maker_orders=True,
+    )
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
     hub = hub or EventHub()
 
