@@ -55,6 +55,7 @@ class AnalysisService:
         execution_experiment: ExperimentsService | None = None,
         timeframe_experiment: ExperimentsService | None = None,
         lab_experiment: ExperimentsService | None = None,
+        learned_experiment: ExperimentsService | None = None,
     ) -> None:
         self.config, self.feed, self.repository, self.store = config, feed, repository, store
         self.clock = clock or LiveClock()
@@ -65,6 +66,7 @@ class AnalysisService:
         self.execution_experiment = execution_experiment
         self.timeframe_experiment = timeframe_experiment
         self.lab_experiment = lab_experiment
+        self.learned_experiment = learned_experiment
         self._cycle_books: dict[str, dict[str, Any]] = {}
         snapshot = config.model_dump(mode="json")
         # Ampliar el universo no cambia las reglas ni termina señales ya abiertas.
@@ -469,6 +471,10 @@ class AnalysisService:
                         ))
                     if self.lab_experiment is not None:
                         held = list(dict.fromkeys(held + self.lab_experiment.holding_symbols()))
+                    if self.learned_experiment is not None:
+                        held = list(dict.fromkeys(
+                            held + self.learned_experiment.holding_symbols()
+                        ))
                     self.selected, self.excluded = select_markets(
                         self._markets, tickers, self.config, held
                     )
@@ -704,6 +710,14 @@ class AnalysisService:
                 )
             if self.lab_experiment is not None:
                 await self.lab_experiment.cycle(
+                    rows=published_rows,
+                    bars=self._bars,
+                    books=self._cycle_books,
+                    markets=self._markets,
+                    analysis_cycle=self.cycles,
+                )
+            if self.learned_experiment is not None:
+                await self.learned_experiment.cycle(
                     rows=published_rows,
                     bars=self._bars,
                     books=self._cycle_books,

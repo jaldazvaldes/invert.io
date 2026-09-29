@@ -126,6 +126,11 @@ def create_app(ctx: ApiContext, hub: EventHub | None = None) -> FastAPI:
         repository_key="lab-strategies-v1", filename="estrategias-laboratorio.csv",
         include_maker_orders=True,
     )
+    register_experiment_routes(
+        app, ctx, prefix="/api/learned-experiment", service_attr="learned_experiment",
+        repository_key="learned-v1", filename="estrategias-aprendizajes.csv",
+        include_maker_orders=True,
+    )
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
     hub = hub or EventHub()
 

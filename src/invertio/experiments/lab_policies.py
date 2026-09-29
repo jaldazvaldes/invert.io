@@ -118,12 +118,15 @@ VARIANTS: dict[str, dict[str, Any]] = {
 }
 
 
-def timeframe(strategy_id: str) -> str:
-    return str(VARIANTS[strategy_id]["timeframe"])
+type Variants = dict[str, dict[str, Any]]
 
 
-def _strategy(strategy_id: str) -> Strategy[Any]:
-    variant = VARIANTS[strategy_id]
+def timeframe(strategy_id: str, variants: Variants | None = None) -> str:
+    return str((VARIANTS if variants is None else variants)[strategy_id]["timeframe"])
+
+
+def _strategy(strategy_id: str, variants: Variants | None = None) -> Strategy[Any]:
+    variant = (VARIANTS if variants is None else variants)[strategy_id]
     cls = STRATEGIES[variant["strategy"]]
     return cls(cls.params_model.model_validate(variant["params"]))
 
@@ -136,10 +139,12 @@ def _label(tf: str) -> str:
     return "4 horas" if tf == "4h" else "1 hora" if tf == "1h" else tf
 
 
-def definitions() -> list[dict[str, Any]]:
+def definitions(variants: Variants | None = None, version: str = VERSION) -> list[dict[str, Any]]:
     result = []
-    for ident, variant in VARIANTS.items():
-        strategy = _strategy(ident)
+    variants = VARIANTS if variants is None else variants
+    for ident, variant in variants.items():
+        strategy = _strategy(ident, variants)
+        maker = variant.get("execution", "maker_entry") == "maker_entry"
         tf, btc_days = variant["timeframe"], variant.get("btc_filter")
         stop_atr = variant["params"]["stop_atr"]
         pending = _TTL_BARS * _minutes(tf)
@@ -151,6 +156,15 @@ def definitions() -> list[dict[str, Any]]:
                 f"puntuación baja a {p['exit_score']:g} o menos."
             )
             atr = "ATR de 14 velas"
+        elif variant["strategy"] == "ruptura_dinamica":
+            p = variant["params"]
+            rule = (
+                f"Compra al cerrar por encima del máximo de las {p['entry_bars']} velas "
+                "anteriores; vende al cerrar por debajo del máximo de las últimas "
+                f"{p.get('trail_bars', 22)} velas menos {points_str(p['stop_atr'])} ATR: un "
+                "stop que sube con el precio y deja correr las ganancias."
+            )
+            atr = "ATR de 22 velas"
         else:
             p = variant["params"]
             rule = (
@@ -158,13 +172,19 @@ def definitions() -> list[dict[str, Any]]:
                 f"anteriores; vende al cerrar por debajo del mínimo de las {p['exit_bars']}."
             )
             atr = "ATR de 20 velas"
+        entry = (
+            "Compra con orden límite pasiva (maker, 0 %) al mejor precio de compra; si en "
+            f"{_TTL_BARS} velas ({pending // 60} h) ningún libro posterior la cruza, se "
+            "cancela. Venta inmediata (taker, 0,09 %)."
+            if maker
+            else "Compra y venta inmediatas al libro (taker, 0,09 % por lado), sin esperar a "
+            "que el precio baje hasta una orden pasiva."
+        )
         rules = [
             rule,
             f"Stop a {points_str(stop_atr)} ATR ({atr}), sin objetivo de beneficio ni caducidad.",
             f"Velas cerradas de {_label(tf)} de Revolut X.",
-            "Compra con orden límite pasiva (maker, 0 %) al mejor precio de compra; si en "
-            f"{_TTL_BARS} velas ({pending // 60} h) ningún libro posterior la cruza, se "
-            "cancela. Venta inmediata (taker, 0,09 %).",
+            entry,
             "Stop y datos se revisan cada minuto con el libro de órdenes.",
         ]
         if btc_days:
@@ -173,22 +193,26 @@ def definitions() -> list[dict[str, Any]]:
                 f"Solo compra si el último cierre diario de BTC está por encima de su media "
                 f"de {btc_days} días. Las ventas no se bloquean.",
             )
+        definition: dict[str, Any] = {
+            "id": ident,
+            "name": variant["name"],
+            "description": variant["description"],
+            "rules": rules,
+            "simulation_config": SimulationConfig(
+                stop_atr=Decimal(str(stop_atr)),
+                target_atr=Decimal(_NO_TARGET_ATR),
+                lifetime_minutes=_NO_EXPIRY_MINUTES,
+            ).model_dump(mode="json"),
+            "sources": [],
+            "version": version,
+            "experimental": True,
+            "execution": "maker_entry" if maker else "taker",
+        }
+        if maker:
+            definition["pending_minutes"] = pending
         result.append(
             {
-                "id": ident,
-                "name": variant["name"],
-                "description": variant["description"],
-                "rules": rules,
-                "simulation_config": SimulationConfig(
-                    stop_atr=Decimal(str(stop_atr)),
-                    target_atr=Decimal(_NO_TARGET_ATR),
-                    lifetime_minutes=_NO_EXPIRY_MINUTES,
-                ).model_dump(mode="json"),
-                "sources": [],
-                "version": VERSION,
-                "experimental": True,
-                "execution": "maker_entry",
-                "pending_minutes": pending,
+                **definition,
                 "timeframe_minutes": _minutes(tf),
                 "strategy": variant["strategy"],
                 "btc_filter": btc_days,
@@ -265,15 +289,17 @@ def evaluate(
     now: datetime,
     *,
     cache: dict[tuple[str, str], tuple[Any, dict[str, Any]]] | None = None,
+    variants: Variants | None = None,
 ) -> dict[str, Any]:
     """Señal de la última vela cerrada; la frescura la marca la vela de un minuto."""
-    if strategy_id not in VARIANTS:
+    variants = VARIANTS if variants is None else variants
+    if strategy_id not in variants:
         raise ValueError(f"Estrategia desconocida o no operativa: {strategy_id}")
     if now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("now debe incluir zona horaria")
-    tf = timeframe(strategy_id)
+    tf = timeframe(strategy_id, variants)
     period = timeframe_delta(tf)
-    warmup = _strategy(strategy_id).warmup_bars
+    warmup = _strategy(strategy_id, variants).warmup_bars
     result = _empty(warmup, "Preparando indicadores")
     closed_minutes = [bar for bar in minute if bar.close_time <= now]
     if closed_minutes:
@@ -303,7 +329,7 @@ def evaluate(
     if cached is not None and cached[0] == fingerprint:
         signal = cached[1]
     else:
-        signal = _signal(strategy_id, closed, btc_daily)
+        signal = _signal(strategy_id, closed, btc_daily, variants)
         if cache is not None:
             cache[slot] = (fingerprint, signal)
     result.update(copy.deepcopy(signal))
@@ -315,9 +341,11 @@ def evaluate(
     return result
 
 
-def _signal(strategy_id: str, closed: list[Bar], btc_daily: list[Bar]) -> dict[str, Any]:
-    variant = VARIANTS[strategy_id]
-    strategy = _strategy(strategy_id)
+def _signal(
+    strategy_id: str, closed: list[Bar], btc_daily: list[Bar], variants: Variants
+) -> dict[str, Any]:
+    variant = variants[strategy_id]
+    strategy = _strategy(strategy_id, variants)
     flat = _Context(holding=False)
     for bar in closed[:-1]:
         strategy.on_bar(bar, flat)

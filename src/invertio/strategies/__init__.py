@@ -9,13 +9,20 @@ from invertio.config.app_config import read_yaml
 from invertio.strategies.base import Strategy, StrategyContext, StrategyParams
 from invertio.strategies.breakout import BreakoutStrategy
 from invertio.strategies.ema_cross import EmaCross
+from invertio.strategies.pullback import PullbackStrategy
 from invertio.strategies.rsi_reversion import RsiReversion
 from invertio.strategies.score import ScoreStrategy
+from invertio.strategies.squeeze import SqueezeStrategy
+from invertio.strategies.trailing_breakout import TrailingBreakoutStrategy
 from invertio.strategies.trend import TrendStrategy
 
 STRATEGIES: dict[str, type[Strategy[Any]]] = {
-    s.id: s for s in (EmaCross, RsiReversion, ScoreStrategy, TrendStrategy, BreakoutStrategy)
-}
+    s.id: s
+    for s in (
+        EmaCross, RsiReversion, ScoreStrategy, TrendStrategy, BreakoutStrategy,
+        TrailingBreakoutStrategy, SqueezeStrategy, PullbackStrategy,
+    )
+}  # fmt: skip
 
 
 def load_strategy(strategy_id: str, config_dir: Path) -> Strategy[Any]:

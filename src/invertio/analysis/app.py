@@ -25,7 +25,11 @@ from invertio.data.throttle import RequestGate
 from invertio.experiments.execution_service import KEY as EXECUTION_KEY
 from invertio.experiments.execution_service import ExecutionExperimentService
 from invertio.experiments.lab_service import KEY as LAB_KEY
-from invertio.experiments.lab_service import LabExperimentsService
+from invertio.experiments.lab_service import (
+    LEARNED_KEY,
+    LabExperimentsService,
+    LearnedExperimentsService,
+)
 from invertio.experiments.service import KEY as EXPERIMENTS_KEY
 from invertio.experiments.service import ExperimentsService
 from invertio.experiments.timeframe_service import KEY as TIMEFRAME_KEY
@@ -85,6 +89,7 @@ async def run_analysis(
     execution_trial: bool = False,
     timeframe_trial: bool = False,
     lab_trial: bool = False,
+    learned_trial: bool = False,
     warn: Callable[[str], None] = print,
 ) -> None:
     if panel and not port_available(settings.panel_port):
@@ -189,6 +194,13 @@ async def run_analysis(
                     store=service.store,
                 )
                 await service.lab_experiment.start()
+            if learned_trial:
+                service.learned_experiment = LearnedExperimentsService(
+                    SimulationRepository(session_factory(db), key=LEARNED_KEY),
+                    service.feed,
+                    store=service.store,
+                )
+                await service.learned_experiment.start()
 
             async def deliver() -> None:
                 assert service is not None and service.dispatcher is not None
@@ -233,6 +245,7 @@ async def run_analysis(
                     execution_experiment=service.execution_experiment,
                     timeframe_experiment=service.timeframe_experiment,
                     lab_experiment=service.lab_experiment,
+                    learned_experiment=service.learned_experiment,
                 )
                 server = build_server(create_app(context, hub), settings.panel_port)
                 server_task = asyncio.create_task(server.serve(), name="analysis-panel")

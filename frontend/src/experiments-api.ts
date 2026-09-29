@@ -2,7 +2,7 @@ import { get } from "./api";
 import type { SimulationConfig, SimulationDecision, SimulationEquity, SimulationStats, SimulationTrade } from "./simulation-api";
 
 export type ExperimentState = "starting" | "running" | "waiting_data" | "error" | "stopped";
-export type ExperimentTrial = "costs" | "original" | "timeframes" | "lab";
+export type ExperimentTrial = "costs" | "original" | "timeframes" | "lab" | "learned";
 
 export interface MakerOrder {
   id: string;
@@ -77,6 +77,6 @@ export interface ExperimentsStatus {
   data_errors?: number;
 }
 
-const API_PATHS: Record<ExperimentTrial, string> = { costs: "/api/execution-experiment", original: "/api/experiments", timeframes: "/api/timeframe-experiment", lab: "/api/lab-experiment" };
+const API_PATHS: Record<ExperimentTrial, string> = { costs: "/api/execution-experiment", original: "/api/experiments", timeframes: "/api/timeframe-experiment", lab: "/api/lab-experiment", learned: "/api/learned-experiment" };
 export const experimentApiPath = (trial: ExperimentTrial) => API_PATHS[trial];
 export const getExperimentsStatus = (trial: ExperimentTrial = "original") => get<ExperimentsStatus>(`${experimentApiPath(trial)}/status`);

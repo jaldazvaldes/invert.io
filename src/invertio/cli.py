@@ -391,6 +391,13 @@ def analyze(
             help="Estrategias aprobadas en el laboratorio (velas de 4 h), 50 € ficticios.",
         ),
     ] = False,
+    learned_trial: Annotated[
+        bool,
+        typer.Option(
+            "--learned-trial",
+            help="Aprendizajes: ruptura dinámica 4 h y compras maker frente a inmediatas.",
+        ),
+    ] = False,
 ) -> None:
     """Analiza Revolut X; --manual-orders habilita los botones de órdenes reales."""
     from invertio.analysis.app import run_analysis
@@ -427,6 +434,10 @@ def analyze(
                 "[cyan]Velas de 10 min y 1 h: 8 × 50 € ficticios con las mismas cuatro "
                 "estrategias.[/cyan]"
             )
+        if learned_trial:
+            console.print(
+                "[cyan]Aprendizajes: 6 × 50 € ficticios, maker frente a inmediata.[/cyan]"
+            )
         if lab_trial:
             console.print(
                 "[cyan]Estrategias del laboratorio: velas de 4 h, compras maker, "
@@ -437,7 +448,7 @@ def analyze(
                                  simulate=simulate, compare_strategies=compare_strategies,
                                  execution_trial=execution_trial,
                                  timeframe_trial=timeframe_trial,
-                                 lab_trial=lab_trial,
+                                 lab_trial=lab_trial, learned_trial=learned_trial,
                                  warn=_warn))
     except KeyboardInterrupt:
         console.print("Análisis detenido; el historial se conserva.")

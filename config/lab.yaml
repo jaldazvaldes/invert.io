@@ -60,6 +60,30 @@ strategies:
       stop_atr: [2, 3]
       trend_ema: [null, 200]
 
+  # Estrategias diseñadas con lo aprendido el 29/09/2026 (velas largas, stops fuera del ruido,
+  # dejar correr las ganancias, filtro de tendencia). Ojo: el año de test ya se ha mirado al
+  # diseñarlas; su prueba limpia es la observación en vivo.
+  ruptura_dinamica:
+    timeframes: [1h, 4h]
+    btc_filter: [null, 50, 200]
+    grid:
+      entry_bars: [20, 55, 100]
+      stop_atr: [2, 3, 4]
+  compresion:
+    timeframes: [1h, 4h]
+    btc_filter: [null, 50, 200]
+    grid:
+      squeeze_ratio: [0.6, 0.75]
+      breakout_bars: [20, 40]
+      stop_atr: [2, 3]
+  retroceso:
+    timeframes: [1h, 4h]
+    btc_filter: [null, 50, 200]
+    grid:
+      dip: [15, 25]
+      exit_rsi: [60, 80]
+      stop_atr: [3]
+
 # Rotación semanal (invertio lab rotation): una sola cartera que cada lunes se queda con las
 # `top` monedas de mayor rentabilidad en `lookback_days` días (solo si es positiva) y vende
 # el resto; con el filtro de BTC apagado, todo a euros. Compras y ventas a mercado.

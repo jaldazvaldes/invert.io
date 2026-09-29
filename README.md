@@ -274,7 +274,12 @@ activadas juntas. Las cuentas de 1 minuto no cambian ni reinician su historial.
 - Al arrancar se descargan 1000 velas de 5 min y de 1 h por mercado (se guardan en
   `data/bars/revolutx/`), así que las estrategias deciden desde el primer momento. Después, las
   velas largas se construyen con las velas de 1 minuto que el análisis ya descarga (coinciden con
-  las nativas); solo se piden de nuevo a Revolut X tras un hueco, con un tope de 15 s por ciclo.
+  las nativas) y se guardan en disco; solo se piden de nuevo a Revolut X si falta alguna (también
+  huecos en medio de la serie), con un tope de 15 s por ciclo. Si una posición abierta no tiene
+  sus velas al día, se descargan antes de decidir.
+- El 29/09/2026 un reinicio cerró las 21 posiciones abiertas de este grupo por un fallo ya
+  corregido (las velas construidas no se guardaban y el disco se había quedado atrás); esas
+  operaciones figuran como «Con interrupción de datos».
 
 ## Estrategias aprobadas en el laboratorio
 
@@ -309,6 +314,32 @@ altcoins cayendo un 33 % de mediana). Usan las mismas clases y parámetros que e
 La rotación semanal por momento (`invertio lab rotation`) no aprobó: ganó en entrenamiento
 (+69 %, por debajo de mantener BTC, +104 %) y perdió un 42 % en el test (BTC: −25 %). Con el
 filtro de BTC salía peor. No está en esta pestaña.
+
+## Aprendizajes: estrategias nuevas y compras maker frente a inmediatas
+
+```powershell
+uv run invertio analyze --all-markets --simulate --compare-strategies --execution-trial --timeframe-trial --lab-trial --learned-trial
+```
+
+Con 856 operaciones ficticias cerradas se vio que: las velas largas funcionan mucho mejor que
+las de 1 y 5 minutos; en 1 minuto el stop salta por ruido (4 minutos de media); importa cuánto
+se gana al acertar más que el % de aciertos; el filtro de tendencia de BTC es lo que más ayuda;
+y las compras maker (0 %) salieron peores que las inmediatas en 1 y 5 minutos, porque se
+ejecutan justo cuando el precio cae.
+
+Con eso se diseñaron tres estrategias nuevas y se pasaron por el laboratorio:
+
+| Estrategia | Idea | Laboratorio |
+| --- | --- | --- |
+| `ruptura_dinamica` | Ruptura de N velas con stop que sube con el precio (Chandelier), sin objetivo | **Aprueba** solo en 4 h con filtro BTC 50 días (+0,4 %, 69 % de monedas en positivo) |
+| `compresion` | Ruptura tras una etapa de volatilidad baja | Suspende en todas las variantes |
+| `retroceso` | Comprar caídas cortas (RSI 3) dentro de una tendencia alcista | Suspende en todas las variantes |
+
+Ojo: el año de test ya se había mirado al diseñarlas, así que la prueba limpia es la
+observación en vivo. En **Estrategias → Aprendizajes** hay seis cuentas de 50 € ficticios que
+empiezan juntas: la ruptura dinámica de 4 h, la ruptura de 1 h y la puntuación de 4 h (ambas con
+filtro BTC 50), cada una con compra **maker** y con compra **inmediata**, para medir si la
+compra pasiva también sale peor con velas largas. Las cuentas de los demás grupos no cambian.
 
 ## Prueba manual con 50 € en Revolut X
 

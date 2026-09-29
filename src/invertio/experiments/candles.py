@@ -12,9 +12,11 @@ un minuto y libros. Las velas largas se guardan por (mercado, vela nativa de Rev
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import time
 from datetime import datetime, timedelta
+from itertools import pairwise
 from typing import Any, ClassVar
 
 from invertio.analysis.market import AnalysisFeed
@@ -51,6 +53,8 @@ class LongCandleExperiments(ExperimentsService):
         self.data_errors: dict[str, str] = {}
         self._refreshed_cycle = -1
         self._attempted: dict[tuple[str, str], float] = {}
+        # Huecos (vela anterior) que ni Revolut X tiene: no se piden otra vez.
+        self._unfillable: dict[tuple[str, str], set[datetime]] = {}
 
     def native(self, symbol: str, timeframe: str) -> list[Bar]:
         return self._native.get((symbol, timeframe), [])
@@ -93,10 +97,37 @@ class LongCandleExperiments(ExperimentsService):
         expected = floor_to_timeframe(now, f"{minutes}m") - timeframe_delta(timeframe)
         return cached[-1].open_time >= expected
 
-    def extend(self, bars: dict[str, list[Bar]]) -> None:
-        """Continúa cada serie larga con bloques completos de velas de un minuto, sin red."""
+    def _missing_since(self, key: tuple[str, str], now: datetime) -> datetime | None:
+        """Desde cuándo pedir velas: el primer hueco de la ventana o el final; None si nada.
+
+        Las reglas necesitan velas consecutivas: un hueco en medio las deja sin preparar
+        aunque la última vela esté al día. Un hueco que Revolut X tampoco tiene se anota y
+        no se vuelve a pedir en cada ciclo.
+        """
+        cached = self._native.get(key)
+        step = timeframe_delta(key[1])
+        oldest = now - step * self.history_candles
+        if not cached:
+            return oldest
+        unfillable = self._unfillable.get(key, set())
+        for prev, bar in pairwise(cached):
+            if (
+                bar.open_time - prev.open_time != step
+                and prev.close_time >= oldest
+                and prev.open_time not in unfillable
+            ):
+                return prev.close_time
+        return None if self._current(key, now) else max(cached[-1].close_time, oldest)
+
+    def extend(self, bars: dict[str, list[Bar]]) -> dict[tuple[str, str], list[Bar]]:
+        """Continúa cada serie larga con bloques completos de velas de un minuto, sin red.
+
+        Devuelve las velas añadidas para guardarlas: si solo vivieran en memoria, tras un
+        reinicio largo el disco no llegaría hasta las velas de un minuto disponibles.
+        """
         now = self.clock.now()
         minute = timedelta(minutes=1)
+        result: dict[tuple[str, str], list[Bar]] = {}
         for key, cached in list(self._native.items()):
             symbol, timeframe = key
             step = timeframe_delta(timeframe)
@@ -134,6 +165,14 @@ class LongCandleExperiments(ExperimentsService):
                 start += step
             if added:
                 self._native[key] = (cached + added)[-self.history_candles :]
+                result[key] = added
+        return result
+
+    async def _persist(self, added: dict[tuple[str, str], list[Bar]]) -> None:
+        if self.store is None:
+            return
+        for (symbol, timeframe), bars in added.items():
+            await asyncio.to_thread(self.store.write, "revolutx", symbol, timeframe, bars)
 
     async def load(self, symbols: list[str]) -> None:
         """Recupera del disco las series largas aún no cargadas; no usa la red."""
@@ -145,14 +184,14 @@ class LongCandleExperiments(ExperimentsService):
                     self._loaded.add(key)
 
     async def refresh(self, symbols: list[str]) -> None:
-        """Descarga las series que no se han podido continuar, con tope de tiempo por ciclo."""
+        """Descarga lo que falta (huecos o velas nuevas), con tope de tiempo por ciclo."""
         deadline = time.monotonic() + self.refresh_budget_seconds
         await self.load(symbols)
         pending = [
             (symbol, timeframe)
             for timeframe in self.native_timeframes
             for symbol in symbols
-            if not self._current((symbol, timeframe), self.clock.now())
+            if self._missing_since((symbol, timeframe), self.clock.now()) is not None
         ]
         # Primero las que llevan más tiempo sin intentarse: el tope no deja ninguna atrás.
         pending.sort(key=lambda key: self._attempted.get(key, 0.0))
@@ -162,10 +201,10 @@ class LongCandleExperiments(ExperimentsService):
             self._attempted[key] = time.monotonic()
             symbol, timeframe = key
             now = self.clock.now()
-            step = timeframe_delta(timeframe)
+            since = self._missing_since(key, now)
+            if since is None:
+                continue
             cached = self._native[key]
-            oldest = now - step * self.history_candles
-            since = max(cached[-1].close_time, oldest) if cached else oldest
             try:
                 fresh = await self.feed.bars(symbol, since, now, timeframe=timeframe)
             except Exception as exc:
@@ -179,6 +218,17 @@ class LongCandleExperiments(ExperimentsService):
             self._native[key] = sorted(merged.values(), key=lambda bar: bar.open_time)[
                 -self.history_candles :
             ]
+            # Si el hueco pedido sigue ahí, Revolut X no tiene esas velas: no insistir.
+            gap = next(
+                (
+                    prev.open_time
+                    for prev, bar in pairwise(self._native[key])
+                    if prev.close_time == since and bar.open_time != since
+                ),
+                None,
+            )
+            if gap is not None:
+                self._unfillable.setdefault(key, set()).add(gap)
 
     def before_decisions(self, symbols: list[str], now: datetime) -> None:
         """Gancho sin red tras actualizar las velas y antes de que decidan las carteras."""
@@ -192,6 +242,9 @@ class LongCandleExperiments(ExperimentsService):
         markets: dict[str, dict[str, Any]],
         analysis_cycle: int,
     ) -> None:
+        # Con el estado cargado se sabe qué posiciones hay abiertas antes de decidir.
+        with contextlib.suppress(Exception):  # si falla, el ciclo base lo registra
+            await self.start()
         symbols = sorted(
             {row["market"].split(":", 1)[1] for row in rows} | set(self.holding_symbols())
         )
@@ -202,7 +255,26 @@ class LongCandleExperiments(ExperimentsService):
             await self.load(symbols)
         except Exception as exc:
             self.data_errors["load"] = type(exc).__name__
-        self.extend(bars)
+        added = self.extend(bars)
+        try:
+            await self._persist(added)
+        except Exception as exc:
+            self.data_errors["persist"] = type(exc).__name__
+        # Una posición abierta sin velas al día o con huecos (p. ej. tras un reinicio largo)
+        # se vendería por falta de datos: se descargan antes de decidir, con el mismo tope.
+        now = self.clock.now()
+        stale = [
+            symbol
+            for symbol in self.holding_symbols()
+            if any(
+                self._missing_since((symbol, tf), now) is not None for tf in self.native_timeframes
+            )
+        ]
+        if stale:
+            try:
+                await self.refresh(stale)
+            except Exception as exc:
+                self.data_errors["refresh"] = type(exc).__name__
         self.before_decisions(symbols, self.clock.now())
         await super().cycle(
             rows=rows, bars=bars, books=books, markets=markets, analysis_cycle=analysis_cycle

@@ -6,10 +6,12 @@ from datetime import datetime
 from typing import Any, ClassVar
 
 from invertio.core.models import Bar
+from invertio.experiments import learned_policies
 from invertio.experiments.candles import LongCandleExperiments
 from invertio.experiments.lab_policies import (
     DAILY_SOURCE,
     VERSION,
+    Variants,
     daily_from_4h,
     definitions,
     evaluate,
@@ -20,6 +22,7 @@ from invertio.simulation.config import SimulationConfig
 from invertio.simulation.engine import SimulationEngine
 
 KEY = "lab-strategies-v1"
+LEARNED_KEY = "learned-v1"
 BTC = "BTC/EUR"
 
 
@@ -30,6 +33,7 @@ class LabExperimentsService(LongCandleExperiments):
     native_timeframes: ClassVar[dict[str, int]] = {"4h": 240, "1h": 60}
     # 1500 velas: 250 días de 4 h (media de 200 días del filtro de BTC) y 62 días de 1 h.
     history_candles: ClassVar[int] = 1500
+    variants: ClassVar[Variants | None] = None  # None: las de lab_policies.VARIANTS
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -37,22 +41,31 @@ class LabExperimentsService(LongCandleExperiments):
         self._signals: dict[tuple[str, str], tuple[Any, dict[str, Any]]] = {}
 
     def _catalog(self) -> list[dict[str, Any]]:
-        return definitions()
+        return definitions(self.variants, self.signal_version)
 
     def _engine(
         self, definition: dict[str, Any], state: dict[str, Any] | None, now: datetime
     ) -> SimulationEngine:
-        return MakerSimulationEngine(
-            SimulationConfig.model_validate(definition["simulation_config"]),
-            state,
-            now,
-            pending_minutes=definition["pending_minutes"],
-        )
+        config = SimulationConfig.model_validate(definition["simulation_config"])
+        if definition["execution"] == "maker_entry":
+            return MakerSimulationEngine(
+                config, state, now, pending_minutes=definition["pending_minutes"]
+            )
+        return SimulationEngine(config, state, now)
 
     def before_decisions(self, symbols: list[str], now: datetime) -> None:
         self._btc_daily = daily_from_4h(self.native(BTC, DAILY_SOURCE))
 
     def _policy(self, ident: str, bars: list[Bar], now: datetime) -> dict[str, Any]:
         # ``bars`` son las velas de un minuto del análisis: dan el mercado y la frescura.
-        native = self.native(bars[-1].symbol, timeframe(ident)) if bars else []
-        return evaluate(ident, native, bars, self._btc_daily, now, cache=self._signals)
+        native = self.native(bars[-1].symbol, timeframe(ident, self.variants)) if bars else []
+        return evaluate(
+            ident, native, bars, self._btc_daily, now, cache=self._signals, variants=self.variants
+        )
+
+
+class LearnedExperimentsService(LabExperimentsService):
+    name = "Aprendizajes: ruptura dinámica y compras maker frente a inmediatas"
+    identity_prefix = "learned"
+    signal_version = learned_policies.VERSION
+    variants: ClassVar[Variants | None] = learned_policies.VARIANTS

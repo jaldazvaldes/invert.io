@@ -20,7 +20,13 @@ from invertio.core.timeframes import timeframe_delta
 from invertio.data.store import BarStore
 from invertio.experiments import lab_policies
 from invertio.experiments.lab_policies import VARIANTS, daily_from_4h, definitions, evaluate
-from invertio.experiments.lab_service import KEY, LabExperimentsService
+from invertio.experiments.lab_service import (
+    KEY,
+    LEARNED_KEY,
+    LabExperimentsService,
+    LearnedExperimentsService,
+)
+from invertio.experiments.learned_policies import VARIANTS as LEARNED
 from invertio.experiments.maker import MakerSimulationEngine
 from invertio.persistence.db import create_engine_async, session_factory, upgrade_db
 from invertio.simulation.config import SimulationConfig
@@ -249,3 +255,75 @@ async def test_service_uses_maker_engine_and_btc_daily(
         live = (await client.get("/api/lab-experiment/status")).json()
         assert live["history_ready"] == {"4h": 0, "1h": 0}
     assert lab_policies.VERSION == "lab-v1"
+
+
+def test_learned_group_pairs_maker_and_immediate_entries() -> None:
+    values = {value["id"]: value for value in definitions(LEARNED, "learned-v1")}
+    assert len(values) == 6
+    for ident, value in values.items():
+        twin = values[ident.replace("_maker", "_taker") if "maker" in ident else
+                      ident.replace("_taker", "_maker")]  # fmt: skip
+        assert value["lab_params"] == twin["lab_params"]
+        assert value["version"] == "learned-v1"
+        if ident.endswith("_maker"):
+            assert value["execution"] == "maker_entry" and "pending_minutes" in value
+        else:
+            assert value["execution"] == "taker" and "pending_minutes" not in value
+            assert any("inmediatas" in rule for rule in value["rules"])
+    assert values["trailing_4h_btc50_maker"]["strategy"] == "ruptura_dinamica"
+    # El grupo del laboratorio no cambia: sus cuentas guardadas siguen cargando.
+    assert all(d["execution"] == "maker_entry" for d in definitions())
+    assert [d["version"] for d in definitions()] == ["lab-v1"] * 5
+
+
+def test_trailing_breakout_same_decisions_as_the_lab_strategy() -> None:
+    variant = LEARNED["trailing_4h_btc50_taker"]
+    bars = series(420)
+    cls = STRATEGIES[variant["strategy"]]
+    flat = cls(cls.params_model.model_validate(variant["params"]))
+    held = cls(cls.params_model.model_validate(variant["params"]))
+    decisions = 0
+    for end in range(1, len(bars) + 1):
+        bought = flat.on_bar(bars[end - 1], _Ctx(False))
+        sold = held.on_bar(bars[end - 1], _Ctx(True))
+        if end < 100:
+            continue
+        close = bars[end - 1].close_time
+        mine = evaluate("trailing_4h_btc50_taker", bars[:end], minute_at(close),
+                        btc_daily(rising=True), close, variants=LEARNED)  # fmt: skip
+        assert mine["enter"] is any(s.action is SignalAction.BUY for s in bought)
+        assert mine["exit"] is any(s.action is SignalAction.CLOSE for s in sold)
+        decisions += mine["enter"] + mine["exit"]
+    assert decisions > 0
+
+
+async def test_learned_service_uses_both_engines(tmp_path: Path) -> None:
+    settings = Settings(_env_file=None, data_dir=tmp_path)
+    upgrade_db(settings)
+    db = create_engine_async(settings)
+    sessions = session_factory(db)
+    clock = SimClock(datetime(2026, 9, 29, 12, 0, 30, tzinfo=UTC))
+    try:
+        learned = LearnedExperimentsService(
+            SimulationRepository(sessions, key=LEARNED_KEY), cast(AnalysisFeed, Feed(clock)),
+            clock=clock,
+        )  # fmt: skip
+        await learned.start()
+        assert learned.state is not None
+        engines = {d["id"]: learned._engine(d, None, clock.now())
+                   for d in learned.state["definitions"]}  # fmt: skip
+        assert isinstance(engines["score_4h_btc50_maker"], MakerSimulationEngine)
+        assert not isinstance(engines["score_4h_btc50_taker"], MakerSimulationEngine)
+        learned._native[("SOL/EUR", "4h")] = series(420)
+        close = series(420)[-1].close_time
+        result = learned._policy("trailing_4h_btc50_maker", minute_at(close), close)
+        assert result["ready"] is True
+        ctx = ApiContext(settings, repo_config(), None, sessions, BarStore(tmp_path / "bars"))
+        ctx.learned_experiment = learned
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=create_app(ctx)), base_url="http://localhost"
+        ) as client:
+            status = (await client.get("/api/learned-experiment/status")).json()
+            assert len(status["strategies"]) == 6
+    finally:
+        await db.dispose()

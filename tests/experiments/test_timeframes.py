@@ -224,6 +224,7 @@ class Feed:
         self.requests: list[tuple[str, str, datetime]] = []
         self.book_calls = 0
         self.fail = False
+        self.missing: set[datetime] = set()  # velas que Revolut X no tendría
 
     async def bars(
         self, symbol: str, since: datetime, now: datetime, *, timeframe: str = "1m"
@@ -237,7 +238,8 @@ class Feed:
             start += timedelta(minutes=step)
         result = []
         while start + timedelta(minutes=step) <= now:
-            result.append(Bar("revolutx", symbol, timeframe, start, 100, 101, 99, 100, 1))
+            if start not in self.missing:
+                result.append(Bar("revolutx", symbol, timeframe, start, 100, 101, 99, 100, 1))
             start += timedelta(minutes=step)
         return result
 
@@ -498,3 +500,79 @@ async def test_restart_decides_in_first_cycle_with_stored_candles(
     # Sin red y antes de decidir: las posiciones abiertas no se quedan sin datos.
     assert set(seen) == {999}
     assert feed.requests == []
+
+
+async def test_restart_with_stale_disk_keeps_open_positions(
+    trial: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Regresión 29/09/2026: tras un reinicio con velas de disco antiguas se vendían todas."""
+    service, feed, clock, _, _, _ = trial
+
+    def fake(ident: str, native: list[Bar], minute: list[Bar], now: datetime) -> dict[str, Any]:
+        current = bool(native) and now - native[-1].close_time <= timedelta(minutes=70)
+        return {"enter": True, "exit": False, "ready": current, "atr": 1,
+                "signal_bar_ts": now.replace(second=0, microsecond=0).isoformat(),
+                "current_bar_ts": now.isoformat(), "entry_reason": "Test", "exit_reason": "Test",
+                "indicators": {}}  # fmt: skip
+
+    monkeypatch.setattr(service_module, "evaluate", fake)
+    await service.cycle(**inputs(clock.now()), analysis_cycle=1)  # descarga el histórico
+    clock.set(clock.now() + timedelta(minutes=1))
+    await service.cycle(**inputs(clock.now()), analysis_cycle=2)  # compra
+    assert all(p["positions"] for p in service.state["portfolios"].values())
+    # Reinicio rápido, pero con un disco sin velas recientes (otra carpeta vacía).
+    clock.set(clock.now() + timedelta(minutes=1))
+    feed.requests.clear()
+    restarted = TimeframeExperimentsService(
+        service.repository, cast(AnalysisFeed, feed), clock=clock,
+        store=BarStore(tmp_path / "vacío"),
+    )  # fmt: skip
+    await restarted.cycle(**inputs(clock.now()), analysis_cycle=3)
+    assert restarted.last_error is None
+    assert {tf for _, tf, _ in feed.requests} == {"5m", "1h"}  # antes de decidir
+    assert restarted.state is not None
+    for portfolio in restarted.state["portfolios"].values():
+        assert set(portfolio["positions"]) == {"BTC/EUR"}
+        assert not any("falta de datos" in d["reason"] for d in portfolio["decisions"])
+
+
+async def test_candles_built_from_minutes_are_saved(trial: Any) -> None:
+    service, _, clock, store, *_ = trial
+    await service.refresh(["BTC/EUR"])
+    last_hour = service._native[("BTC/EUR", "1h")][-1].open_time
+    clock.set(datetime(2026, 9, 29, 11, 0, 40, tzinfo=UTC))
+    start = last_hour + timedelta(hours=1)
+    minutes = [
+        Bar("revolutx", "BTC/EUR", "1m", start + timedelta(minutes=i), 100, 101, 99, 100, 1)
+        for i in range(60)
+    ]
+    snapshot = inputs(clock.now())
+    snapshot["bars"] = {"BTC/EUR": minutes}
+    await service.cycle(**snapshot, analysis_cycle=1)
+    saved = store.read("revolutx", "BTC/EUR", "1h", venue="revolutx")
+    assert saved[-1].open_time == last_hour + timedelta(hours=1)
+
+
+async def test_holes_inside_the_series_are_filled_once(trial: Any) -> None:
+    """Regresión 29/09/2026: el disco guardaba solo una de cada dos velas de 5 minutos."""
+    service, feed, _, store, *_ = trial
+    await service.refresh(["BTC/EUR"])
+    series = service._native[("BTC/EUR", "5m")]
+    hole = series[-10].open_time
+    service._native[("BTC/EUR", "5m")] = [bar for bar in series if bar.open_time != hole]
+    feed.requests.clear()
+    await service.refresh(["BTC/EUR"])
+    assert [(tf, since) for _, tf, since in feed.requests] == [("5m", hole)]
+    repaired = service._native[("BTC/EUR", "5m")]
+    assert all(b.open_time - a.open_time == timedelta(minutes=5)
+               for a, b in pairwise(repaired))  # fmt: skip
+    assert hole in {bar.open_time for bar in store.read("revolutx", "BTC/EUR", "5m",
+                                                         venue="revolutx")}  # fmt: skip
+    # Un hueco que Revolut X tampoco tiene se pide una vez y no se insiste.
+    other = repaired[-20].open_time
+    feed.missing.add(other)
+    service._native[("BTC/EUR", "5m")] = [bar for bar in repaired if bar.open_time != other]
+    feed.requests.clear()
+    await service.refresh(["BTC/EUR"])
+    await service.refresh(["BTC/EUR"])
+    assert [(tf, since) for _, tf, since in feed.requests] == [("5m", other)]
